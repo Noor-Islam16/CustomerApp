@@ -29,6 +29,13 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
+import {
+  apiCheckPhone,
+  apiCompleteProfile,
+  apiSendOtp,
+  apiVerifyOtp,
+  saveToken,
+} from "./services/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "phone" | "otp" | "profile";
@@ -58,7 +65,6 @@ type ApprovalStatus = "auto" | "manual" | null;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const OTP_LENGTH = 6;
-const VALID_OTP = "252002";
 const RESEND_COOLDOWN = 30;
 const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const isGstValid = (gst: string) => GST_REGEX.test(gst.trim().toUpperCase());
@@ -197,7 +203,7 @@ const ProfileSetupScreen: React.FC = () => {
     }
   }, [form.gstNumber]);
 
-  // ── Shake animation ──
+  // ── Shake animations ──
   const triggerShake = useCallback(() => {
     shakeAnim.setValue(0);
     Animated.sequence([
@@ -260,15 +266,18 @@ const ProfileSetupScreen: React.FC = () => {
     ]).start();
   }, [otpShakeAnim]);
 
-  // ── Check if phone is registered ──
+  // ── Check if phone is registered ──────────────────────────────────────────
   const checkPhoneRegistration = async (phoneNumber: string) => {
     if (phoneNumber.length === 10) {
       setCheckingPhone(true);
       try {
-        await new Promise((r) => setTimeout(r, 800));
-        const registered = Math.random() > 0.5;
-        setIsPhoneRegistered(registered);
-        return registered;
+        const data = await apiCheckPhone(phoneNumber);
+        setIsPhoneRegistered(data.isRegistered);
+        return data.isRegistered as boolean;
+      } catch {
+        // If check fails, don't block the user — just hide the banner
+        setIsPhoneRegistered(false);
+        return false;
       } finally {
         setCheckingPhone(false);
       }
@@ -276,7 +285,7 @@ const ProfileSetupScreen: React.FC = () => {
     return false;
   };
 
-  // ── Send OTP ──
+  // ── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async () => {
     if (phone.length !== 10) {
       Alert.alert(
@@ -286,15 +295,17 @@ const ProfileSetupScreen: React.FC = () => {
       triggerShake();
       return;
     }
-
     setOtpLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1200));
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setStep("otp");
       setTimeout(() => otpRefs.current[0]?.focus(), 400);
-    } catch {
-      Alert.alert("Error", "Failed to send OTP. Please try again.");
+    } catch (err: any) {
+      Alert.alert(
+        "Error",
+        err.message || "Failed to send OTP. Please try again.",
+      );
     } finally {
       setOtpLoading(false);
     }
@@ -311,7 +322,6 @@ const ProfileSetupScreen: React.FC = () => {
     if (digit && index < OTP_LENGTH - 1) {
       otpRefs.current[index + 1]?.focus();
     }
-
     if (digit && index === OTP_LENGTH - 1) {
       const filled = [...newOtp.slice(0, OTP_LENGTH - 1), digit];
       if (filled.every((d) => d !== "")) {
@@ -334,7 +344,7 @@ const ProfileSetupScreen: React.FC = () => {
     }
   };
 
-  // ── Verify OTP ──
+  // ── Verify OTP ─────────────────────────────────────────────────────────────
   const handleVerifyOtp = async (code?: string) => {
     const otpCode = code ?? otp.join("");
     if (otpCode.length < OTP_LENGTH) {
@@ -342,35 +352,37 @@ const ProfileSetupScreen: React.FC = () => {
       triggerOtpShake();
       return;
     }
-
     setOtpLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      const data = await apiVerifyOtp(phone, otpCode);
 
-      if (otpCode === VALID_OTP) {
-        setStep("profile");
-        setTimeout(() => nameRef.current?.focus(), 400);
-      } else {
-        setOtpError("Invalid OTP. Please try again.");
-        triggerOtpShake();
-        setOtp(Array(OTP_LENGTH).fill(""));
-        setTimeout(() => otpRefs.current[0]?.focus(), 100);
-      }
+      // Save JWT for the profile step (protected route)
+      await saveToken(data.token);
+
+      setStep("profile");
+      setTimeout(() => nameRef.current?.focus(), 400);
+    } catch (err: any) {
+      setOtpError(err.message || "Invalid OTP. Please try again.");
+      triggerOtpShake();
+      setOtp(Array(OTP_LENGTH).fill(""));
+      setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } finally {
       setOtpLoading(false);
     }
   };
 
-  // ── Resend OTP ──
+  // ── Resend OTP ─────────────────────────────────────────────────────────────
   const handleResend = async () => {
     if (resendTimer > 0) return;
     setOtpLoading(true);
     setOtp(Array(OTP_LENGTH).fill(""));
     setOtpError("");
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to resend OTP.");
     } finally {
       setOtpLoading(false);
     }
@@ -388,18 +400,14 @@ const ProfileSetupScreen: React.FC = () => {
         );
         return;
       }
-
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-
       const { latitude, longitude } = location.coords;
-
       const [address] = await Location.reverseGeocodeAsync({
         latitude,
         longitude,
       });
-
       if (address) {
         setForm((prev) => ({
           ...prev,
@@ -410,13 +418,12 @@ const ProfileSetupScreen: React.FC = () => {
           latitude,
           longitude,
         }));
-
         Alert.alert(
           "📍 Location Detected",
           "Address has been auto-filled from your current location.",
         );
       }
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Could not fetch location. Please enter manually.");
     } finally {
       setLocationLoading(false);
@@ -433,39 +440,24 @@ const ProfileSetupScreen: React.FC = () => {
 
   const validate = (): boolean => {
     const newErrors: FieldError = {};
-
-    if (!form.contactName.trim()) {
+    if (!form.contactName.trim())
       newErrors.contactName = "Contact person name is required.";
-    } else if (form.contactName.trim().length < 2) {
+    else if (form.contactName.trim().length < 2)
       newErrors.contactName = "Please enter a valid name.";
-    }
-
-    if (!form.addressLine1.trim()) {
+    if (!form.addressLine1.trim())
       newErrors.addressLine1 = "Address is required.";
-    }
-
-    if (!form.city.trim()) {
-      newErrors.city = "City is required.";
-    }
-
-    if (!form.state.trim()) {
-      newErrors.state = "State is required.";
-    }
-
-    if (!form.pincode.trim()) {
-      newErrors.pincode = "Pincode is required.";
-    } else if (!/^\d{6}$/.test(form.pincode.trim())) {
+    if (!form.city.trim()) newErrors.city = "City is required.";
+    if (!form.state.trim()) newErrors.state = "State is required.";
+    if (!form.pincode.trim()) newErrors.pincode = "Pincode is required.";
+    else if (!/^\d{6}$/.test(form.pincode.trim()))
       newErrors.pincode = "Enter a valid 6-digit pincode.";
-    }
-
-    if (form.gstNumber && !isGstValid(form.gstNumber)) {
+    if (form.gstNumber && !isGstValid(form.gstNumber))
       newErrors.gstNumber = "Invalid GST number format.";
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // ── Submit Profile ─────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!validate()) {
       triggerShake();
@@ -473,10 +465,22 @@ const ProfileSetupScreen: React.FC = () => {
     }
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1800));
-      const isAutoApproved = form.gstNumber && isGstValid(form.gstNumber);
-      setApprovalStatus(isAutoApproved ? "auto" : "manual");
+      const data = await apiCompleteProfile({
+        contactName: form.contactName,
+        addressLine1: form.addressLine1,
+        addressLine2: form.addressLine2,
+        city: form.city,
+        state: form.state,
+        pincode: form.pincode,
+        gstNumber: form.gstNumber,
+        latitude: form.latitude ?? null,
+        longitude: form.longitude ?? null,
+      });
+
+      // Server tells us the resolved approval status
+      setApprovalStatus(data.approvalStatus as ApprovalStatus);
       setShowSuccessModal(true);
+
       setTimeout(() => {
         Animated.parallel([
           Animated.spring(successScale, {
@@ -492,8 +496,11 @@ const ProfileSetupScreen: React.FC = () => {
           }),
         ]).start();
       }, 100);
-    } catch {
-      Alert.alert("Error", "Something went wrong. Please try again.");
+    } catch (err: any) {
+      Alert.alert(
+        "Error",
+        err.message || "Something went wrong. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -616,9 +623,7 @@ const ProfileSetupScreen: React.FC = () => {
         <Animated.View
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
-          {/* ────────────────────────────────────────────────
-              STEP 1 — PHONE INPUT
-          ──────────────────────────────────────────────── */}
+          {/* ── STEP 1 — PHONE ── */}
           {step === "phone" && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
@@ -746,9 +751,7 @@ const ProfileSetupScreen: React.FC = () => {
             </View>
           )}
 
-          {/* ────────────────────────────────────────────────
-              STEP 2 — OTP VERIFICATION
-          ──────────────────────────────────────────────── */}
+          {/* ── STEP 2 — OTP ── */}
           {step === "otp" && (
             <Animated.View
               style={{ transform: [{ translateX: otpShakeAnim }] }}
@@ -878,9 +881,7 @@ const ProfileSetupScreen: React.FC = () => {
             </Animated.View>
           )}
 
-          {/* ────────────────────────────────────────────────
-              STEP 3 — PROFILE FORM
-          ──────────────────────────────────────────────── */}
+          {/* ── STEP 3 — PROFILE FORM ── */}
           {step === "profile" && (
             <>
               {/* Contact Details */}
@@ -1524,7 +1525,7 @@ const ProfileSetupScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* ── Success Modal (Centered) ── */}
+      {/* ── Success Modal ── */}
       <Modal
         visible={showSuccessModal}
         transparent
@@ -1625,7 +1626,7 @@ const ProfileSetupScreen: React.FC = () => {
   );
 };
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles (unchanged from original) ────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
   header: {
@@ -1682,8 +1683,6 @@ const styles = StyleSheet.create({
     paddingTop: hp("2.5%"),
     paddingBottom: hp("5%"),
   },
-
-  // Card
   card: {
     backgroundColor: Colors.surface,
     borderRadius: wp("4.5%"),
@@ -1711,8 +1710,6 @@ const styles = StyleSheet.create({
     marginTop: hp("0.5%"),
   },
   phoneHighlight: { fontWeight: "700", color: Colors.primary },
-
-  // Phone Input
   phoneInputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1763,8 +1760,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.primary,
   },
-
-  // OTP
   otpContainer: { marginBottom: hp("1.5%") },
   otpRow: {
     flexDirection: "row",
@@ -1827,8 +1822,6 @@ const styles = StyleSheet.create({
     gap: wp("2%"),
   },
   waHintText: { fontSize: wp("3.2%"), color: "#075E54", fontWeight: "600" },
-
-  // Form Sections
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1863,8 +1856,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontWeight: "500",
   },
-
-  // Fields
   fieldWrap: { marginBottom: hp("2%") },
   label: {
     fontSize: wp("3.5%"),
@@ -1910,11 +1901,8 @@ const styles = StyleSheet.create({
     gap: wp("1.5%"),
   },
   hintText: { fontSize: wp("3%"), color: Colors.textMuted },
-
   twoColRow: { flexDirection: "row", gap: wp("3%") },
   halfField: { flex: 1 },
-
-  // Map Picker
   mapPickerBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1945,8 +1933,6 @@ const styles = StyleSheet.create({
     color: Colors.success,
     fontWeight: "500",
   },
-
-  // GST
   gstStatusChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1974,8 +1960,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: wp("4.8%"),
   },
-
-  // Buttons
   primaryBtn: {
     backgroundColor: Colors.primary,
     borderRadius: wp("3.5%"),
@@ -2028,8 +2012,6 @@ const styles = StyleSheet.create({
     marginTop: hp("2%"),
   },
   legalLink: { color: Colors.primary, fontWeight: "600" },
-
-  // Dropdown Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,
@@ -2092,8 +2074,6 @@ const styles = StyleSheet.create({
   },
   dropdownItemText: { fontSize: wp("3.8%"), color: Colors.textPrimary },
   dropdownItemTextSelected: { color: Colors.primary, fontWeight: "600" },
-
-  // Success Modal (Centered)
   successModalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,

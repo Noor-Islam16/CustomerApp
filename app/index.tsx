@@ -22,6 +22,7 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
+import { apiSendOtp, apiVerifyOtp, saveToken } from "./services/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Screen = "phone" | "otp";
@@ -49,7 +50,6 @@ const LoginScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendTimer, setResendTimer] = useState(0);
-  const [otpSent, setOtpSent] = useState(false);
 
   // ── Refs ──
   const otpRefs = useRef<(TextInput | null)[]>([]);
@@ -159,7 +159,7 @@ const LoginScreen: React.FC = () => {
   // ── Phone validation ──
   const isPhoneValid = phone.replace(/\s/g, "").length === 10;
 
-  // ── Send OTP ──
+  // ── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async () => {
     if (!isPhoneValid) {
       setError("Please enter a valid 10-digit mobile number.");
@@ -169,13 +169,13 @@ const LoginScreen: React.FC = () => {
     setError("");
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1500));
-      setOtpSent(true);
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setScreen("otp");
       setTimeout(() => otpRefs.current[0]?.focus(), 400);
-    } catch {
-      setError("Failed to send OTP. Please try again.");
+    } catch (err: any) {
+      // Server sends { message } on error
+      setError(err.message || "Failed to send OTP. Please try again.");
       triggerShake();
     } finally {
       setLoading(false);
@@ -217,8 +217,7 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  // ── Verify OTP ──
-  // ── Verify OTP ──
+  // ── Verify OTP ─────────────────────────────────────────────────────────────
   const handleVerifyOtp = async (code?: string) => {
     const otpCode = code ?? otp.join("");
     if (otpCode.length < OTP_LENGTH) {
@@ -229,19 +228,21 @@ const LoginScreen: React.FC = () => {
     setError("");
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1500));
+      const data = await apiVerifyOtp(phone, otpCode);
 
-      // Check if OTP matches "252002"
-      if (otpCode === "252002") {
-        router.push("/(tabs)/home");
+      // Save JWT so protected routes work immediately
+      await saveToken(data.token);
+
+      // Navigate based on profile state
+      if (data.isNewUser || !data.isProfileComplete) {
+        // New user → go to signup/profile setup
+        router.push("/signup");
       } else {
-        setError("Invalid OTP. Please try again.");
-        triggerShake();
-        setOtp(Array(OTP_LENGTH).fill(""));
-        setTimeout(() => otpRefs.current[0]?.focus(), 100);
+        // Existing user with complete profile → go home
+        router.push("/(tabs)/home");
       }
-    } catch {
-      setError("Invalid OTP. Please try again.");
+    } catch (err: any) {
+      setError(err.message || "Invalid OTP. Please try again.");
       triggerShake();
       setOtp(Array(OTP_LENGTH).fill(""));
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
@@ -250,16 +251,19 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  // ── Resend OTP ──
+  // ── Resend OTP ─────────────────────────────────────────────────────────────
   const handleResend = async () => {
     if (resendTimer > 0) return;
     setLoading(true);
     setOtp(Array(OTP_LENGTH).fill(""));
     setError("");
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
+    } catch (err: any) {
+      setError(err.message || "Failed to resend OTP. Please try again.");
+      triggerShake();
     } finally {
       setLoading(false);
     }
@@ -364,7 +368,6 @@ const LoginScreen: React.FC = () => {
                         color={Colors.textMuted}
                       />
                     </View>
-
                     <TextInput
                       ref={phoneRef}
                       style={[
@@ -577,13 +580,8 @@ const LoginScreen: React.FC = () => {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  keyboardView: {
-    flex: 1,
-  },
+  root: { flex: 1, backgroundColor: Colors.background },
+  keyboardView: { flex: 1 },
   gradientBg: {
     position: "absolute",
     top: 0,
@@ -616,22 +614,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerSpacer: {
-    width: wp("10%"),
-  },
-  scroll: {
-    flexGrow: 1,
-    paddingBottom: hp("4%"),
-  },
+  headerSpacer: { width: wp("10%") },
+  scroll: { flexGrow: 1, paddingBottom: hp("4%") },
   logoSection: {
     alignItems: "center",
     marginTop: hp("3%"),
     marginBottom: hp("3%"),
   },
-  logoContainer: {
-    position: "relative",
-    marginBottom: hp("2%"),
-  },
+  logoContainer: { position: "relative", marginBottom: hp("2%") },
   logoCircle: {
     width: wp("24%"),
     height: wp("24%"),
@@ -658,10 +648,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.white,
   },
-  logoImage: {
-    width: wp("32%"),
-    height: wp("32%"),
-  },
+  logoImage: { width: wp("32%"), height: wp("32%") },
   appName: {
     fontSize: wp("7%"),
     fontWeight: "800",
@@ -690,9 +677,7 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 12,
   },
-  cardHeader: {
-    marginBottom: hp("2.5%"),
-  },
+  cardHeader: { marginBottom: hp("2.5%") },
   cardTitle: {
     fontSize: wp("6%"),
     fontWeight: "800",
@@ -704,13 +689,8 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: wp("5.5%"),
   },
-  phoneHighlight: {
-    fontWeight: "700",
-    color: Colors.primary,
-  },
-  inputSection: {
-    marginBottom: hp("2%"),
-  },
+  phoneHighlight: { fontWeight: "700", color: Colors.primary },
+  inputSection: { marginBottom: hp("2%") },
   inputLabel: {
     fontSize: wp("3.5%"),
     fontWeight: "600",
@@ -718,11 +698,7 @@ const styles = StyleSheet.create({
     marginBottom: hp("1%"),
     marginLeft: wp("1%"),
   },
-  phoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
+  phoneRow: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   countryBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -734,9 +710,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     gap: wp("1.5%"),
   },
-  countryFlag: {
-    fontSize: wp("5.5%"),
-  },
+  countryFlag: { fontSize: wp("5.5%") },
   countryDial: {
     fontSize: wp("3.8%"),
     fontWeight: "600",
@@ -754,13 +728,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  inputError: {
-    borderColor: Colors.error,
-    backgroundColor: "#FFF5F5",
-  },
-  otpSection: {
-    marginBottom: hp("2%"),
-  },
+  inputError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
+  otpSection: { marginBottom: hp("2%") },
   otpRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -788,10 +757,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.otpBoxFilled,
     color: Colors.primary,
   },
-  otpBoxError: {
-    borderColor: Colors.error,
-    backgroundColor: "#FFF5F5",
-  },
+  otpBoxError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
   progressRow: {
     flexDirection: "row",
     justifyContent: "center",
@@ -804,21 +770,14 @@ const styles = StyleSheet.create({
     borderRadius: wp("0.9%"),
     backgroundColor: Colors.border,
   },
-  progressDotFilled: {
-    backgroundColor: Colors.primary,
-    width: wp("4%"),
-  },
+  progressDotFilled: { backgroundColor: Colors.primary, width: wp("4%") },
   errorContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: hp("1%"),
     marginLeft: wp("1%"),
   },
-  errorText: {
-    fontSize: wp("3.3%"),
-    color: Colors.error,
-    fontWeight: "500",
-  },
+  errorText: { fontSize: wp("3.3%"), color: Colors.error, fontWeight: "500" },
   primaryBtn: {
     backgroundColor: Colors.primary,
     borderRadius: wp("3.5%"),
@@ -852,29 +811,20 @@ const styles = StyleSheet.create({
     lineHeight: wp("4.5%"),
     marginTop: hp("2%"),
   },
-  legalLink: {
-    color: Colors.primary,
-    fontWeight: "600",
-  },
+  legalLink: { color: Colors.primary, fontWeight: "600" },
   resendRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     marginTop: hp("2%"),
   },
-  resendLabel: {
-    fontSize: wp("3.5%"),
-    color: Colors.textSecondary,
-  },
+  resendLabel: { fontSize: wp("3.5%"), color: Colors.textSecondary },
   resendLink: {
     fontSize: wp("3.5%"),
     fontWeight: "700",
     color: Colors.primary,
   },
-  resendLinkDisabled: {
-    color: Colors.textMuted,
-    fontWeight: "400",
-  },
+  resendLinkDisabled: { color: Colors.textMuted, fontWeight: "400" },
   waHint: {
     flexDirection: "row",
     alignItems: "center",
@@ -886,14 +836,8 @@ const styles = StyleSheet.create({
     marginTop: hp("2%"),
     gap: wp("2%"),
   },
-  waHintText: {
-    fontSize: wp("3.2%"),
-    color: Colors.accent,
-    fontWeight: "600",
-  },
-  signupContainer: {
-    marginTop: hp("2.5%"),
-  },
+  waHintText: { fontSize: wp("3.2%"), color: Colors.accent, fontWeight: "600" },
+  signupContainer: { marginTop: hp("2.5%") },
   divider: {
     height: 1,
     backgroundColor: Colors.divider,
@@ -904,10 +848,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  signupLabel: {
-    fontSize: wp("3.5%"),
-    color: Colors.textSecondary,
-  },
+  signupLabel: { fontSize: wp("3.5%"), color: Colors.textSecondary },
   signupLink: {
     fontSize: wp("3.5%"),
     fontWeight: "700",
