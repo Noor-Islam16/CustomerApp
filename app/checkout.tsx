@@ -1,4 +1,4 @@
-// app/checkout.tsx
+
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
-  Image,
   Modal,
   Platform,
   ScrollView,
@@ -15,6 +14,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
+  Image,
 } from "react-native";
 import {
   heightPercentageToDP as hp,
@@ -23,10 +24,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "../constants/colors";
 import { useCart } from "../context/CartContext";
+import { apiGetMe, apiPlaceOrder, Order } from "./services/api"; 
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface OrderData {
+interface CartOrderData {
   items: any[];
   subtotal: number;
+  couponCode?: string;
   couponDiscount: number;
   deliveryCharge: number;
   platformFee: number;
@@ -36,57 +40,69 @@ interface OrderData {
   appliedCoupon: string | null;
 }
 
+interface UserProfile {
+  contactName?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 const CheckoutScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const [orderData, setOrderData] = useState<OrderData | null>(null);
+  const { cart, clearCart } = useCart();
+
+  // ── State ──
+  const [orderData, setOrderData] = useState<CartOrderData | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userPhone, setUserPhone] = useState<string>("");
+  const [loadingProfile, setLoadingProfile] = useState(true);
+
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [countdown, setCountdown] = useState(10);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
 
-  const slideAnim = useRef(new Animated.Value(100)).current;
+  const slideAnim = useRef(new Animated.Value(300)).current;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { clearCart } = useCart();
 
-  // Parse order data on mount
+  // ── Parse cart data from params ──
   useEffect(() => {
     if (params.orderData) {
       try {
         const parsed = JSON.parse(params.orderData as string);
         setOrderData(parsed);
-      } catch (error) {
-        console.error("Error parsing order data:", error);
+      } catch {
+        Alert.alert("Error", "Failed to load order details.");
+        router.back();
       }
     }
   }, [params.orderData]);
 
-  // Handle payment completion
+  // ── Fetch user profile for delivery address ──
   useEffect(() => {
-    if (paymentCompleted) {
-      // Clear the cart after successful payment
-      clearCart();
+    const fetchProfile = async () => {
+      try {
+        const res = await apiGetMe();
+        setUserProfile(res.user.profile);
+        setUserPhone(res.user.phone);
+      } catch {
+        // Profile fetch failed — user can still see checkout but address may be incomplete
+        setUserProfile(null);
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+    fetchProfile();
+  }, []);
 
-      // Show success alert and navigate
-      Alert.alert(
-        "Payment Successful! 🎉",
-        "Your order has been placed successfully.",
-        [
-          {
-            text: "Continue Shopping",
-            onPress: () => router.replace("/(tabs)/home"),
-          },
-        ],
-      );
-
-      // Reset payment completed state
-      setPaymentCompleted(false);
-    }
-  }, [paymentCompleted, clearCart]);
-
-  // Handle modal animation and countdown separately
+  // ── Modal animation ──
   useEffect(() => {
     if (showPaymentModal) {
-      // Animate modal in
       Animated.spring(slideAnim, {
         toValue: 0,
         tension: 50,
@@ -94,51 +110,133 @@ const CheckoutScreen: React.FC = () => {
         useNativeDriver: true,
       }).start();
 
-      // Start countdown
       setCountdown(10);
       if (timerRef.current) clearInterval(timerRef.current);
-
       timerRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            // Auto-confirm payment after 10 seconds
-            handlePaymentSuccess();
+            clearInterval(timerRef.current!);
+            timerRef.current = null;
+            handleConfirmPayment();
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
     } else {
-      // Reset animation when modal closes
-      slideAnim.setValue(100);
+      slideAnim.setValue(300);
     }
 
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [showPaymentModal]);
 
-  const handlePaymentSuccess = useCallback(() => {
+  // ─── Place order with backend ─────────────────────────────────────────────
+
+  const handleConfirmPayment = useCallback(async () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
     setShowPaymentModal(false);
 
-    // Use setTimeout to avoid calling clearCart during render
-    setTimeout(() => {
-      setPaymentCompleted(true);
-    }, 100);
-  }, []);
+    if (!orderData || !userProfile) return;
+
+    // Guard: need address
+    if (
+      !userProfile.contactName ||
+      !userProfile.addressLine1 ||
+      !userProfile.city ||
+      !userProfile.state ||
+      !userProfile.pincode
+    ) {
+      Alert.alert(
+        "Incomplete Address",
+        "Please complete your delivery address in your profile before placing an order.",
+        [{ text: "Go to Profile", onPress: () => router.push("/(tabs)/home") }],
+      );
+
+      return;
+    }
+
+    setIsPlacingOrder(true);
+
+    try {
+      // Build items payload — map from cart format to API format
+      const itemsPayload = orderData.items.map((item: any) => ({
+        productId: item.product._id || item.product.id,
+        quantity: item.quantity,
+      }));
+
+      const payload = {
+        items: itemsPayload,
+        deliveryAddress: {
+          contactName: userProfile.contactName,
+          addressLine1: userProfile.addressLine1,
+          addressLine2: userProfile.addressLine2,
+          city: userProfile.city,
+          state: userProfile.state,
+          pincode: userProfile.pincode,
+          phone: userPhone,
+        },
+        couponCode: orderData.appliedCoupon || undefined,
+        couponDiscount: orderData.couponDiscount,
+        deliveryCharge: orderData.deliveryCharge,
+        platformFee: orderData.platformFee,
+        gst: orderData.gst,
+        deliveryTip: orderData.deliveryTip,
+        paymentMethod: "upi" as const,
+        transactionId: `TXN-${Date.now()}`, // mock — replace with real UPI txn ID
+      };
+
+      const result = await apiPlaceOrder(payload);
+
+      // Success
+      clearCart();
+      setPlacedOrder(result.data);
+
+      Alert.alert(
+        "Order Placed! 🎉",
+        `Your order ${result.data.orderNumber} has been placed successfully.`,
+        [
+          {
+            text: "View Order",
+            onPress: () =>
+              router.replace({
+                pathname: "/(tabs)/home",
+                params: { orderId: result.data._id },
+              }),
+          },
+          {
+            text: "Continue Shopping",
+            onPress: () => router.replace("/(tabs)/home"),
+          },
+        ],
+      );
+    } catch (err: any) {
+      Alert.alert(
+        "Order Failed",
+        err?.message || "Something went wrong. Please try again.",
+        [{ text: "OK" }],
+      );
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  }, [orderData, userProfile, userPhone, clearCart]);
 
   const handlePlaceOrder = () => {
+    if (!userProfile?.contactName) {
+      Alert.alert(
+        "Complete Profile",
+        "Please complete your profile with delivery address before placing an order.",
+        [
+          { text: "Go to Profile", onPress: () => router.push("/(tabs)/home") },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+      return;
+    }
     setShowPaymentModal(true);
   };
 
@@ -150,24 +248,28 @@ const CheckoutScreen: React.FC = () => {
     setShowPaymentModal(false);
   };
 
-  if (!orderData) {
+  // ─── Loading / Empty states ───────────────────────────────────────────────
+
+  if (!orderData || loadingProfile) {
     return (
       <View style={styles.loadingContainer}>
-        <StatusBar
-          barStyle="dark-content"
-          backgroundColor={Colors.gradientStart}
-        />
-        <Text style={styles.loadingText}>Loading...</Text>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.gradientStart} />
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading checkout...</Text>
       </View>
     );
   }
 
+  // ─── Render ───────────────────────────────────────────────────────────────
+
+  const hasAddress =
+    userProfile?.contactName &&
+    userProfile?.addressLine1 &&
+    userProfile?.city;
+
   return (
     <View style={styles.root}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={Colors.gradientStart}
-      />
+      <StatusBar barStyle="dark-content" backgroundColor={Colors.gradientStart} />
 
       {/* Header */}
       <LinearGradient
@@ -183,15 +285,8 @@ const CheckoutScreen: React.FC = () => {
         ]}
       >
         <View style={styles.headerContent}>
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.back()}
-          >
-            <Ionicons
-              name="arrow-back"
-              size={wp("5.5%")}
-              color={Colors.white}
-            />
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={wp("5.5%")} color={Colors.white} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Checkout</Text>
           <View style={{ width: wp("10%") }} />
@@ -201,9 +296,9 @@ const CheckoutScreen: React.FC = () => {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: hp("12%") }}
+        contentContainerStyle={{ paddingBottom: hp("14%") }}
       >
-        {/* Delivery Address */}
+        {/* ── Delivery Address ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
           <View style={styles.addressCard}>
@@ -215,30 +310,52 @@ const CheckoutScreen: React.FC = () => {
               />
               <Text style={styles.addressType}>Home</Text>
             </View>
-            <Text style={styles.addressName}>Sonali Ray</Text>
-            <Text style={styles.addressText}>
-              123, Greenfield Apartments,{"\n"}
-              Near City Mall, Andheri East,{"\n"}
-              Mumbai - 400069, Maharashtra
-            </Text>
-            <Text style={styles.addressPhone}>📞 +91 98765 43210</Text>
-            <TouchableOpacity style={styles.changeAddressBtn}>
-              <Text style={styles.changeAddressText}>Change</Text>
+
+            {hasAddress ? (
+              <>
+                <Text style={styles.addressName}>{userProfile.contactName}</Text>
+                <Text style={styles.addressText}>
+                  {userProfile.addressLine1}
+                  {userProfile.addressLine2
+                    ? `,\n${userProfile.addressLine2}`
+                    : ""}
+                  {`\n${userProfile.city}, ${userProfile.state} - ${userProfile.pincode}`}
+                </Text>
+                {userPhone ? (
+                  <Text style={styles.addressPhone}>📞 {userPhone}</Text>
+                ) : null}
+              </>
+            ) : (
+              <View style={styles.missingAddressBox}>
+                <Feather name="alert-circle" size={wp("4%")} color={Colors.error} />
+                <Text style={styles.missingAddressText}>
+                  Delivery address is incomplete. Please update your profile.
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.changeAddressBtn}
+              onPress={() => router.push("/(tabs)/home")}
+            >
+              <Text style={styles.changeAddressText}>
+                {hasAddress ? "Change" : "Add"}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Order Summary */}
+        {/* ── Order Summary ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
           <View style={styles.summaryCard}>
-            {orderData.items.map((item, index) => (
+            {orderData.items.map((item: any, index: number) => (
               <View key={index} style={styles.summaryItem}>
                 <View style={styles.summaryItemLeft}>
                   <Text style={styles.summaryItemName} numberOfLines={1}>
                     {item.product.name}
                   </Text>
-                  <Text style={styles.summaryItemQty}>x{item.quantity}</Text>
+                  <Text style={styles.summaryItemQty}>×{item.quantity}</Text>
                 </View>
                 <Text style={styles.summaryItemPrice}>
                   ₹{item.product.price * item.quantity}
@@ -256,7 +373,7 @@ const CheckoutScreen: React.FC = () => {
             {orderData.couponDiscount > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={[styles.summaryLabel, { color: Colors.success }]}>
-                  Coupon Discount
+                  Coupon ({orderData.appliedCoupon})
                 </Text>
                 <Text style={[styles.summaryValue, { color: Colors.success }]}>
                   -₹{orderData.couponDiscount}
@@ -265,11 +382,9 @@ const CheckoutScreen: React.FC = () => {
             )}
 
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Delivery Charge</Text>
+              <Text style={styles.summaryLabel}>Delivery</Text>
               <Text style={styles.summaryValue}>
-                {orderData.deliveryCharge === 0
-                  ? "FREE"
-                  : `₹${orderData.deliveryCharge}`}
+                {orderData.deliveryCharge === 0 ? "FREE" : `₹${orderData.deliveryCharge}`}
               </Text>
             </View>
 
@@ -279,16 +394,14 @@ const CheckoutScreen: React.FC = () => {
             </View>
 
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>GST</Text>
+              <Text style={styles.summaryLabel}>GST (5%)</Text>
               <Text style={styles.summaryValue}>₹{orderData.gst}</Text>
             </View>
 
             {orderData.deliveryTip > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Delivery Tip</Text>
-                <Text style={styles.summaryValue}>
-                  ₹{orderData.deliveryTip}
-                </Text>
+                <Text style={styles.summaryValue}>₹{orderData.deliveryTip}</Text>
               </View>
             )}
 
@@ -301,7 +414,7 @@ const CheckoutScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Payment Method */}
+        {/* ── Payment Method ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
           <View style={styles.paymentCard}>
@@ -312,17 +425,13 @@ const CheckoutScreen: React.FC = () => {
                 color={Colors.primary}
               />
               <Text style={styles.paymentOptionText}>UPI / QR Code</Text>
-              <Feather
-                name="check-circle"
-                size={wp("5%")}
-                color={Colors.primary}
-              />
+              <Feather name="check-circle" size={wp("5%")} color={Colors.primary} />
             </View>
           </View>
         </View>
       </ScrollView>
 
-      {/* Bottom Place Order Bar */}
+      {/* ── Bottom Bar ── */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom }]}>
         <LinearGradient
           colors={["rgba(255,255,255,0.95)", Colors.white]}
@@ -333,9 +442,10 @@ const CheckoutScreen: React.FC = () => {
             <Text style={styles.bottomBarAmount}>₹{orderData.totalAmount}</Text>
           </View>
           <TouchableOpacity
-            style={styles.placeOrderBtn}
+            style={[styles.placeOrderBtn, isPlacingOrder && { opacity: 0.7 }]}
             onPress={handlePlaceOrder}
             activeOpacity={0.9}
+            disabled={isPlacingOrder}
           >
             <LinearGradient
               colors={[Colors.primary, Colors.primaryDark]}
@@ -343,13 +453,17 @@ const CheckoutScreen: React.FC = () => {
               end={{ x: 1, y: 0 }}
               style={styles.placeOrderGradient}
             >
-              <Text style={styles.placeOrderText}>Place Order</Text>
+              {isPlacingOrder ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <Text style={styles.placeOrderText}>Place Order</Text>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </LinearGradient>
       </View>
 
-      {/* Payment QR Code Modal */}
+      {/* ── Payment QR Modal ── */}
       <Modal
         visible={showPaymentModal}
         transparent
@@ -374,7 +488,7 @@ const CheckoutScreen: React.FC = () => {
               Scan the QR code with any UPI app
             </Text>
 
-            {/* QR Code */}
+            {/* QR Placeholder */}
             <View style={styles.qrContainer}>
               <View style={styles.qrCode}>
                 <MaterialCommunityIcons
@@ -386,7 +500,7 @@ const CheckoutScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Countdown Timer */}
+            {/* Countdown */}
             <View style={styles.countdownContainer}>
               <Text style={styles.countdownText}>
                 Auto-confirming in {countdown}s
@@ -401,35 +515,32 @@ const CheckoutScreen: React.FC = () => {
               </View>
             </View>
 
-            <Text style={styles.payWithText}>Pay with any UPI</Text>
+            <Text style={styles.payWithText}>Pay with any UPI app</Text>
 
-            {/* UPI Apps */}
             <View style={styles.upiAppsContainer}>
-              <Image
-                source={{
-                  uri: "https://upload.wikimedia.org/wikipedia/commons/9/9d/Phonepe-blue.svg",
-                }}
-                style={styles.upiIcon}
-              />
-              <Image
-                source={{
-                  uri: "https://upload.wikimedia.org/wikipedia/commons/2/24/Paytm_Logo_%28standalone%29.svg",
-                }}
-                style={styles.upiIcon}
-              />
-              <Image
-                source={{
-                  uri: "https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg",
-                }}
-                style={styles.upiIcon}
-              />
+              {[
+                "https://upload.wikimedia.org/wikipedia/commons/9/9d/Phonepe-blue.svg",
+                "https://upload.wikimedia.org/wikipedia/commons/2/24/Paytm_Logo_%28standalone%29.svg",
+                "https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg",
+              ].map((uri) => (
+                <Image
+                  key={uri}
+                  source={{ uri }}
+                  style={styles.upiIcon}
+                />
+              ))}
             </View>
 
             <TouchableOpacity
-              style={styles.confirmPaymentBtn}
-              onPress={handlePaymentSuccess}
+              style={[styles.confirmPaymentBtn, isPlacingOrder && { opacity: 0.7 }]}
+              onPress={handleConfirmPayment}
+              disabled={isPlacingOrder}
             >
-              <Text style={styles.confirmPaymentText}>I've Paid</Text>
+              {isPlacingOrder ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <Text style={styles.confirmPaymentText}>I've Paid</Text>
+              )}
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -438,25 +549,20 @@ const CheckoutScreen: React.FC = () => {
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  root: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: Colors.background,
+    gap: hp("2%"),
   },
-  loadingText: {
-    fontSize: wp("4%"),
-    color: Colors.textSecondary,
-  },
-  header: {
-    paddingBottom: hp("2%"),
-    paddingHorizontal: wp("5%"),
-  },
+  loadingText: { fontSize: wp("3.8%"), color: Colors.textSecondary },
+
+  header: { paddingBottom: hp("2%"), paddingHorizontal: wp("5%") },
   headerContent: {
     flexDirection: "row",
     alignItems: "center",
@@ -470,19 +576,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: {
-    fontSize: wp("4.5%"),
-    fontWeight: "700",
-    color: Colors.white,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: wp("4%"),
-    paddingTop: hp("2%"),
-  },
-  section: {
-    marginBottom: hp("2%"),
-  },
+  headerTitle: { fontSize: wp("4.5%"), fontWeight: "700", color: Colors.white },
+
+  content: { flex: 1, paddingHorizontal: wp("4%"), paddingTop: hp("2%") },
+  section: { marginBottom: hp("2%") },
   sectionTitle: {
     fontSize: wp("4%"),
     fontWeight: "700",
@@ -490,7 +587,7 @@ const styles = StyleSheet.create({
     marginBottom: hp("1.5%"),
   },
 
-  // Address Card
+  // Address
   addressCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -508,11 +605,7 @@ const styles = StyleSheet.create({
     gap: wp("2%"),
     marginBottom: hp("1%"),
   },
-  addressType: {
-    fontSize: wp("3.5%"),
-    fontWeight: "600",
-    color: Colors.primary,
-  },
+  addressType: { fontSize: wp("3.5%"), fontWeight: "600", color: Colors.primary },
   addressName: {
     fontSize: wp("3.8%"),
     fontWeight: "700",
@@ -525,10 +618,19 @@ const styles = StyleSheet.create({
     lineHeight: wp("5%"),
     marginBottom: hp("1%"),
   },
-  addressPhone: {
-    fontSize: wp("3.3%"),
-    color: Colors.textSecondary,
+  addressPhone: { fontSize: wp("3.3%"), color: Colors.textSecondary },
+  missingAddressBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: wp("2%"),
+    backgroundColor: "#FFF0F0",
+    padding: wp("3%"),
+    borderRadius: wp("2%"),
+    borderWidth: 1,
+    borderColor: Colors.error + "40",
+    marginBottom: hp("1%"),
   },
+  missingAddressText: { flex: 1, fontSize: wp("3.2%"), color: Colors.error },
   changeAddressBtn: {
     position: "absolute",
     top: wp("4%"),
@@ -545,7 +647,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
 
-  // Summary Card
+  // Summary
   summaryCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -568,35 +670,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: wp("2%"),
   },
-  summaryItemName: {
-    flex: 1,
-    fontSize: wp("3.3%"),
-    color: Colors.textPrimary,
-  },
-  summaryItemQty: {
-    fontSize: wp("3%"),
-    color: Colors.textMuted,
-  },
+  summaryItemName: { flex: 1, fontSize: wp("3.3%"), color: Colors.textPrimary },
+  summaryItemQty: { fontSize: wp("3%"), color: Colors.textMuted },
   summaryItemPrice: {
     fontSize: wp("3.3%"),
     fontWeight: "600",
     color: Colors.textPrimary,
   },
-  divider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginVertical: hp("1%"),
-  },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: hp("1%") },
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: hp("0.6%"),
   },
-  summaryLabel: {
-    fontSize: wp("3.3%"),
-    color: Colors.textSecondary,
-  },
+  summaryLabel: { fontSize: wp("3.3%"), color: Colors.textSecondary },
   summaryValue: {
     fontSize: wp("3.3%"),
     fontWeight: "500",
@@ -618,7 +706,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 
-  // Payment Card
+  // Payment
   paymentCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -641,7 +729,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 
-  // Bottom Bar
+  // Bottom bar
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -658,31 +746,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp("6%"),
     paddingTop: hp("1.5%"),
   },
-  bottomBarLeft: {
-    flex: 1,
-  },
-  bottomBarLabel: {
-    fontSize: wp("3%"),
-    color: Colors.textMuted,
-  },
+  bottomBarLeft: { flex: 1 },
+  bottomBarLabel: { fontSize: wp("3%"), color: Colors.textMuted },
   bottomBarAmount: {
     fontSize: wp("5%"),
     fontWeight: "800",
     color: Colors.textPrimary,
   },
-  placeOrderBtn: {
-    borderRadius: wp("3%"),
-    overflow: "hidden",
-  },
+  placeOrderBtn: { borderRadius: wp("3%"), overflow: "hidden" },
   placeOrderGradient: {
     paddingHorizontal: wp("6%"),
     paddingVertical: hp("1.5%"),
+    minWidth: wp("35%"),
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: hp("5.5%"),
   },
-  placeOrderText: {
-    fontSize: wp("4%"),
-    fontWeight: "700",
-    color: Colors.white,
-  },
+  placeOrderText: { fontSize: wp("4%"), fontWeight: "700", color: Colors.white },
 
   // Modal
   modalOverlay: {
@@ -713,10 +793,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginBottom: hp("2.5%"),
   },
-  qrContainer: {
-    alignItems: "center",
-    marginBottom: hp("2%"),
-  },
+  qrContainer: { alignItems: "center", marginBottom: hp("2%") },
   qrCode: {
     width: wp("60%"),
     aspectRatio: 1,
@@ -734,9 +811,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     marginTop: hp("1%"),
   },
-  countdownContainer: {
-    marginBottom: hp("2%"),
-  },
+  countdownContainer: { marginBottom: hp("2%") },
   countdownText: {
     fontSize: wp("3.3%"),
     color: Colors.textSecondary,
@@ -749,10 +824,7 @@ const styles = StyleSheet.create({
     borderRadius: hp("0.3%"),
     overflow: "hidden",
   },
-  countdownProgress: {
-    height: "100%",
-    backgroundColor: Colors.primary,
-  },
+  countdownProgress: { height: "100%", backgroundColor: Colors.primary },
   payWithText: {
     fontSize: wp("3.5%"),
     fontWeight: "600",
@@ -777,6 +849,8 @@ const styles = StyleSheet.create({
     borderRadius: wp("3%"),
     paddingVertical: hp("1.6%"),
     alignItems: "center",
+    minHeight: hp("5.5%"),
+    justifyContent: "center",
   },
   confirmPaymentText: {
     fontSize: wp("4%"),
