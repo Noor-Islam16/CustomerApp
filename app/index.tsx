@@ -863,11 +863,19 @@ const LoginScreen: React.FC = () => {
                       },
                     ]}
                   >
-                    <Feather
+                    {/* <Feather
                       name="phone"
                       size={wp("4.5%")}
                       color={Colors.primary}
                       style={styles.profileInputIcon}
+                    /> */}
+                    <Image
+                      source={require("../assets/images/whatsapp-icon.png")}
+                      style={[
+                        styles.profileInputIcon,
+                        { width: wp("4.5%"), height: wp("4.5%") },
+                      ]}
+                      resizeMode="contain"
                     />
                     <Text
                       style={[

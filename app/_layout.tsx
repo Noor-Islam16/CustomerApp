@@ -69,6 +69,7 @@ export default function RootLayout() {
   }, []);
 
   // Check if app was opened from a killed state via notification
+  // In your checkInitialNotification function, add this:
   const checkInitialNotification = async () => {
     try {
       const response = await Notifications.getLastNotificationResponseAsync();
@@ -76,6 +77,18 @@ export default function RootLayout() {
         const data = response.notification.request.content.data;
         console.log("🚀 App opened from notification:", data);
 
+        // ✅ Handle approval status notifications
+        if (data?.type === "approval_status") {
+          setTimeout(() => {
+            if (data.status === "approved") {
+              router.push("/(tabs)/home" as any);
+            } else {
+              router.push("/(tabs)/account" as any);
+            }
+          }, 1000);
+        }
+
+        // Handle order status updates
         if (data?.type === "order_status_update" && data?.orderId) {
           setTimeout(() => {
             router.push(`/(tabs)/myorders?orderId=${data.orderId}` as any);

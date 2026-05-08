@@ -114,6 +114,7 @@ export async function getStoredPushToken(): Promise<string | null> {
 }
 
 // ─── Add notification response handler ───────────────────────────────────────
+// In the addNotificationResponseReceivedListener callback
 export function addNotificationResponseReceivedListener(
   navigationHandler: (screen: string) => void,
 ): Notifications.EventSubscription {
@@ -122,7 +123,17 @@ export function addNotificationResponseReceivedListener(
       const data = response.notification.request.content.data;
       console.log("🔔 Notification tapped:", data);
 
-      // Navigate based on notification type
+      // Handle approval status notifications
+      if (data?.type === "approval_status") {
+        if (data.status === "approved") {
+          navigationHandler("/(tabs)/home");
+        } else {
+          navigationHandler("/(tabs)/account");
+        }
+        return;
+      }
+
+      // Handle other notification types
       if (data?.screen) {
         navigationHandler(data.screen);
       }
