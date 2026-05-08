@@ -45,7 +45,14 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const storedCart = await AsyncStorage.getItem(CART_STORAGE_KEY);
       if (storedCart) {
-        setCart(JSON.parse(storedCart));
+        const parsedCart = JSON.parse(storedCart);
+        // Validate that items have proper price data
+        const validCart = parsedCart.filter(
+          (item: CartItem) =>
+            item.product && (item.product.sellingPrice || item.product.price),
+        );
+        setCart(validCart);
+        console.log("📦 Cart loaded:", validCart.length, "items");
       }
     } catch (error) {
       console.error("Error loading cart:", error);
@@ -63,6 +70,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const addToCart = (product: Product, quantity: number = 1) => {
+    console.log(
+      "➕ Adding to cart:",
+      product.name,
+      "price:",
+      product.sellingPrice,
+    );
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -88,7 +101,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({
     setCart((prev) =>
       prev.map((item) =>
         item.product.id === productId
-          ? { ...item, quantity: Math.min(quantity, item.product.stock) }
+          ? {
+              ...item,
+              quantity: Math.min(quantity, item.product.stockQuantity || 999),
+            }
           : item,
       ),
     );
@@ -102,12 +118,32 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({
     return cart.find((item) => item.product.id === productId)?.quantity || 0;
   };
 
-  const cartTotal = cart.reduce(
-    (sum, item) => sum + item.product.price * item.quantity,
-    0,
-  );
+  // ✅ FIXED: Use sellingPrice (API field) with fallbacks
+  const cartTotal = cart.reduce((sum, item) => {
+    // Try sellingPrice first (API field), then price (static data), then originalPrice, default to 0
+    const itemPrice =
+      item.product.sellingPrice ||
+      item.product.price ||
+      item.product.originalPrice ||
+      0;
+
+    console.log(
+      "💰 Cart calc:",
+      item.product.name,
+      "price:",
+      itemPrice,
+      "qty:",
+      item.quantity,
+      "subtotal:",
+      itemPrice * item.quantity,
+    );
+
+    return sum + itemPrice * item.quantity;
+  }, 0);
 
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  console.log("🛒 Cart total:", cartTotal, "items:", cartItemCount);
 
   const value: CartContextType = {
     cart,

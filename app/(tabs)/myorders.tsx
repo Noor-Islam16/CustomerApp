@@ -1,9 +1,10 @@
 // app/myorders.tsx
-
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Image,
@@ -22,22 +23,31 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../../constants/colors";
-import { PRODUCTS, Product } from "../../constants/products";
+import { apiCancelOrder, apiGetMyOrders, Order } from "../services/api";
 
 const { width: SW } = Dimensions.get("window");
 
 // ─── Order Status Config ──────────────────────────────────────────────────────
-const ORDER_STATUS = {
+const ORDER_STATUS_CONFIG: Record<
+  string,
+  {
+    label: string;
+    color: string;
+    bg: string;
+    icon: string;
+    step: number;
+  }
+> = {
   pending: {
     label: "Pending",
-    color: Colors.warning,
+    color: "#FF9800",
     bg: "#FFF8E1",
     icon: "clock",
     step: 1,
   },
   confirmed: {
     label: "Confirmed",
-    color: Colors.info,
+    color: "#2196F3",
     bg: "#E3F7FD",
     icon: "check-circle",
     step: 2,
@@ -49,167 +59,30 @@ const ORDER_STATUS = {
     icon: "package",
     step: 3,
   },
-  shipped: {
-    label: "Shipped",
-    color: Colors.accent,
-    bg: Colors.primaryLight,
+  out_for_delivery: {
+    label: "Out for Delivery",
+    color: "#00A884",
+    bg: "#E8F5E9",
     icon: "truck",
     step: 4,
   },
   delivered: {
     label: "Delivered",
-    color: Colors.success,
-    bg: Colors.accentLight,
+    color: "#4CAF50",
+    bg: "#E8F5E9",
     icon: "check-circle",
     step: 5,
   },
   cancelled: {
     label: "Cancelled",
-    color: Colors.error,
+    color: "#E53935",
     bg: "#FEE8EE",
     icon: "x-circle",
     step: 0,
   },
 };
 
-type OrderStatus = keyof typeof ORDER_STATUS;
-
-// ─── Order Types ──────────────────────────────────────────────────────────────
-interface OrderItem {
-  productId: string;
-  quantity: number;
-}
-
-interface Order {
-  id: string;
-  orderNumber: string;
-  orderDate: string;
-  deliveryDate: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  paymentMethod: string;
-  deliveryAddress: {
-    name: string;
-    address: string;
-    city: string;
-    pincode: string;
-    phone: string;
-  };
-  trackingNumber?: string;
-  prescriptionRequired?: boolean;
-}
-
-// ─── Helper: resolve product ──────────────────────────────────────────────────
-const getProduct = (id: string): Product | undefined =>
-  PRODUCTS.find((p) => p.id === id);
-
-const orderTotal = (items: OrderItem[]): number =>
-  items.reduce((sum, it) => {
-    const p = getProduct(it.productId);
-    return sum + (p ? p.price * it.quantity : 0);
-  }, 0);
-
-// ─── Mock Orders (items reference PRODUCTS ids) ───────────────────────────────
-const MOCK_ORDERS: Order[] = [
-  {
-    id: "1",
-    orderNumber: "NIL12345678",
-    orderDate: "2024-01-15",
-    deliveryDate: "2024-01-18",
-    status: "delivered",
-    items: [
-      { productId: "1", quantity: 2 }, // Premium Basmati Rice
-      { productId: "10", quantity: 1 }, // Tata Tea Gold
-    ],
-    paymentMethod: "Cash on Delivery",
-    deliveryAddress: {
-      name: "Rahul Sharma",
-      address: "123, Nilkanth Society, Near City Hospital",
-      city: "Mumbai, Maharashtra",
-      pincode: "400069",
-      phone: "+91 98765 43210",
-    },
-    trackingNumber: "TRK987654321",
-  },
-  {
-    id: "2",
-    orderNumber: "NIL87654321",
-    orderDate: "2024-01-20",
-    deliveryDate: "2024-01-23",
-    status: "shipped",
-    items: [
-      { productId: "13", quantity: 1 }, // Surf Excel Matic
-      { productId: "14", quantity: 2 }, // Lizol Floor Cleaner
-    ],
-    paymentMethod: "UPI",
-    deliveryAddress: {
-      name: "Rahul Sharma",
-      address: "123, Nilkanth Society, Near City Hospital",
-      city: "Mumbai, Maharashtra",
-      pincode: "400069",
-      phone: "+91 98765 43210",
-    },
-    trackingNumber: "TRK123456789",
-  },
-  {
-    id: "3",
-    orderNumber: "NIL11223344",
-    orderDate: "2024-01-22",
-    deliveryDate: "2024-01-25",
-    status: "processing",
-    items: [
-      { productId: "16", quantity: 1 }, // Dove Shampoo
-      { productId: "18", quantity: 2 }, // Colgate Toothpaste
-    ],
-    paymentMethod: "Credit Card",
-    deliveryAddress: {
-      name: "Rahul Sharma",
-      address: "123, Nilkanth Society, Near City Hospital",
-      city: "Mumbai, Maharashtra",
-      pincode: "400069",
-      phone: "+91 98765 43210",
-    },
-  },
-  {
-    id: "4",
-    orderNumber: "NIL99887766",
-    orderDate: "2024-01-10",
-    deliveryDate: "2024-01-13",
-    status: "cancelled",
-    items: [
-      { productId: "7", quantity: 3 }, // Cadbury Dairy Milk
-    ],
-    paymentMethod: "Cash on Delivery",
-    deliveryAddress: {
-      name: "Rahul Sharma",
-      address: "123, Nilkanth Society, Near City Hospital",
-      city: "Mumbai, Maharashtra",
-      pincode: "400069",
-      phone: "+91 98765 43210",
-    },
-  },
-  {
-    id: "5",
-    orderNumber: "NIL55667788",
-    orderDate: "2024-01-25",
-    deliveryDate: "2024-01-28",
-    status: "pending",
-    items: [
-      { productId: "20", quantity: 1 }, // Imported Dark Chocolate
-      { productId: "19", quantity: 1 }, // Nivea Body Lotion
-    ],
-    paymentMethod: "Net Banking",
-    deliveryAddress: {
-      name: "Rahul Sharma",
-      address: "123, Nilkanth Society, Near City Hospital",
-      city: "Mumbai, Maharashtra",
-      pincode: "400069",
-      phone: "+91 98765 43210",
-    },
-  },
-];
-
-// ─── Tab Filter Options ──────────────────────────────────────────────────────
+// ─── Tabs ────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: "all", label: "All Orders", icon: "list" },
   { id: "active", label: "Active", icon: "package" },
@@ -217,16 +90,45 @@ const TABS = [
   { id: "cancelled", label: "Cancelled", icon: "x-circle" },
 ];
 
-// ─── Order Status Tracker ────────────────────────────────────────────────────
-const OrderStatusTracker = ({ status }: { status: OrderStatus }) => {
-  const statusConfig = ORDER_STATUS[status];
-  const steps = ["pending", "confirmed", "processing", "shipped", "delivered"];
-  const currentStep = statusConfig.step;
+// ─── Helper: Get product image ───────────────────────────────────────────────
+const getProductImage = (item: any) => {
+  // Check for images array first (new format)
+  if (item.images && item.images.length > 0) {
+    const primary = item.images.find((img: any) => img.isPrimary);
+    return primary?.url || item.images[0].url;
+  }
+  // Fallback to imageUrl (old format)
+  if (item.imageUrl) return item.imageUrl;
+  return "https://via.placeholder.com/60";
+};
+
+// ─── Helper: Get item subtitle info ──────────────────────────────────────────
+const getItemSubtitle = (item: any): string => {
+  const parts: string[] = [];
+  if (item.brand) parts.push(item.brand);
+  if (item.type) parts.push(item.type);
+  if (item.color) parts.push(item.color);
+  if (item.warranty && item.warranty !== "No Warranty")
+    parts.push(item.warranty);
+  return parts.join(" · ") || "";
+};
+
+// ─── Order Status Tracker Component ──────────────────────────────────────────
+const OrderStatusTracker = ({ status }: { status: string }) => {
+  const statusConfig = ORDER_STATUS_CONFIG[status];
+  const steps = [
+    "pending",
+    "confirmed",
+    "processing",
+    "out_for_delivery",
+    "delivered",
+  ];
+  const currentStep = statusConfig?.step || 0;
 
   if (status === "cancelled") {
     return (
       <View style={styles.cancelledTracker}>
-        <Feather name="x-circle" size={wp("5%")} color={Colors.error} />
+        <Feather name="x-circle" size={wp("5%")} color="#E53935" />
         <Text style={styles.cancelledText}>Order Cancelled</Text>
       </View>
     );
@@ -235,7 +137,7 @@ const OrderStatusTracker = ({ status }: { status: OrderStatus }) => {
   return (
     <View style={styles.trackerContainer}>
       {steps.map((step, index) => {
-        const stepStatus = ORDER_STATUS[step as OrderStatus];
+        const stepCfg = ORDER_STATUS_CONFIG[step];
         const isCompleted = index < currentStep;
         const isCurrent = index === currentStep - 1;
 
@@ -250,16 +152,12 @@ const OrderStatusTracker = ({ status }: { status: OrderStatus }) => {
                 ]}
               >
                 {isCompleted ? (
-                  <Feather
-                    name="check"
-                    size={wp("3.5%")}
-                    color={Colors.white}
-                  />
+                  <Feather name="check" size={wp("3.5%")} color="#fff" />
                 ) : (
                   <Feather
-                    name={stepStatus.icon as any}
+                    name={(stepCfg?.icon as any) || "circle"}
                     size={wp("3.5%")}
-                    color={isCurrent ? Colors.white : Colors.textMuted}
+                    color={isCurrent ? "#fff" : Colors.textMuted}
                   />
                 )}
               </View>
@@ -277,8 +175,9 @@ const OrderStatusTracker = ({ status }: { status: OrderStatus }) => {
                 styles.trackerLabel,
                 (isCompleted || isCurrent) && styles.trackerLabelActive,
               ]}
+              numberOfLines={1}
             >
-              {stepStatus.label}
+              {stepCfg?.label || step}
             </Text>
           </View>
         );
@@ -287,20 +186,19 @@ const OrderStatusTracker = ({ status }: { status: OrderStatus }) => {
   );
 };
 
-// ─── Order Card ──────────────────────────────────────────────────────────────
+// ─── Order Card Component ────────────────────────────────────────────────────
 const OrderCard = ({
   order,
   onPress,
+  onCancel,
 }: {
   order: Order;
   onPress: () => void;
+  onCancel: () => void;
 }) => {
-  const status = ORDER_STATUS[order.status];
-  const total = orderTotal(order.items);
-  const resolvedItems = order.items.map((it) => ({
-    ...it,
-    product: getProduct(it.productId),
-  }));
+  const statusCfg =
+    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.pending;
+  const total = order.totalAmount;
 
   return (
     <TouchableOpacity
@@ -321,8 +219,7 @@ const OrderCard = ({
           <View>
             <Text style={styles.orderNumber}>{order.orderNumber}</Text>
             <Text style={styles.orderDate}>
-              Ordered on{" "}
-              {new Date(order.orderDate).toLocaleDateString("en-IN", {
+              {new Date(order.createdAt).toLocaleDateString("en-IN", {
                 day: "numeric",
                 month: "short",
                 year: "numeric",
@@ -330,31 +227,31 @@ const OrderCard = ({
             </Text>
           </View>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+        <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
           <Feather
-            name={status.icon as any}
+            name={statusCfg.icon as any}
             size={wp("3%")}
-            color={status.color}
+            color={statusCfg.color}
           />
-          <Text style={[styles.statusText, { color: status.color }]}>
-            {status.label}
+          <Text style={[styles.statusText, { color: statusCfg.color }]}>
+            {statusCfg.label}
           </Text>
         </View>
       </View>
 
       {/* Items Preview */}
       <View style={styles.itemsPreview}>
-        {resolvedItems.slice(0, 2).map(({ productId, quantity, product }) =>
-          product ? (
-            <View key={productId} style={styles.previewItem}>
-              <Image
-                source={{ uri: product.images[0] }}
-                style={styles.previewImage}
-              />
-              <Text style={styles.previewQuantity}>x{quantity}</Text>
-            </View>
-          ) : null,
-        )}
+        {order.items.slice(0, 2).map((item, index) => (
+          <View key={index} style={styles.previewItem}>
+            <Image
+              source={{
+                uri: getProductImage(item),
+              }}
+              style={styles.previewImage}
+            />
+            <Text style={styles.previewQuantity}>x{item.quantity}</Text>
+          </View>
+        ))}
         {order.items.length > 2 && (
           <View style={styles.moreItems}>
             <Text style={styles.moreItemsText}>+{order.items.length - 2}</Text>
@@ -362,7 +259,7 @@ const OrderCard = ({
         )}
       </View>
 
-      {/* Summary row */}
+      {/* Summary */}
       <View style={styles.itemsSummary}>
         <Text style={styles.itemsSummaryText}>
           {order.items.length} {order.items.length === 1 ? "item" : "items"} •
@@ -376,20 +273,14 @@ const OrderCard = ({
       {/* Footer */}
       <View style={styles.cardFooter}>
         {order.status === "delivered" ? (
-          <>
-            <TouchableOpacity style={styles.footerBtn}>
-              <Feather
-                name="rotate-cw"
-                size={wp("3.5%")}
-                color={Colors.primary}
-              />
-              <Text style={styles.footerBtnText}>Reorder</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.footerBtn}>
-              <Feather name="star" size={wp("3.5%")} color={Colors.warning} />
-              <Text style={styles.footerBtnText}>Rate</Text>
-            </TouchableOpacity>
-          </>
+          <TouchableOpacity style={styles.footerBtn}>
+            <Feather
+              name="rotate-cw"
+              size={wp("3.5%")}
+              color={Colors.primary}
+            />
+            <Text style={styles.footerBtnText}>Reorder</Text>
+          </TouchableOpacity>
         ) : order.status === "cancelled" ? (
           <TouchableOpacity style={styles.footerBtn}>
             <Feather
@@ -401,18 +292,13 @@ const OrderCard = ({
           </TouchableOpacity>
         ) : (
           <>
-            <TouchableOpacity style={styles.footerBtn}>
-              <Feather
-                name="help-circle"
-                size={wp("3.5%")}
-                color={Colors.textSecondary}
-              />
-              <Text style={styles.footerBtnText}>Need Help?</Text>
-            </TouchableOpacity>
             {order.status === "pending" && (
-              <TouchableOpacity style={[styles.footerBtn, styles.cancelBtn]}>
-                <Feather name="x" size={wp("3.5%")} color={Colors.error} />
-                <Text style={[styles.footerBtnText, { color: Colors.error }]}>
+              <TouchableOpacity
+                style={[styles.footerBtn, styles.cancelBtn]}
+                onPress={onCancel}
+              >
+                <Feather name="x" size={wp("3.5%")} color="#E53935" />
+                <Text style={[styles.footerBtnText, { color: "#E53935" }]}>
                   Cancel
                 </Text>
               </TouchableOpacity>
@@ -446,8 +332,8 @@ const OrderDetailsModal = ({
 }) => {
   if (!order) return null;
 
-  const status = ORDER_STATUS[order.status];
-  const total = orderTotal(order.items);
+  const statusCfg =
+    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.pending;
 
   return (
     <Modal
@@ -458,7 +344,6 @@ const OrderDetailsModal = ({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          {/* Modal Header */}
           <View style={styles.modalHeader}>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <Feather name="x" size={wp("5%")} color={Colors.textPrimary} />
@@ -478,24 +363,27 @@ const OrderDetailsModal = ({
                   <View
                     style={[
                       styles.statusBadgeLarge,
-                      { backgroundColor: status.bg },
+                      { backgroundColor: statusCfg.bg },
                     ]}
                   >
                     <Feather
-                      name={status.icon as any}
+                      name={statusCfg.icon as any}
                       size={wp("3.5%")}
-                      color={status.color}
+                      color={statusCfg.color}
                     />
                     <Text
-                      style={[styles.statusTextLarge, { color: status.color }]}
+                      style={[
+                        styles.statusTextLarge,
+                        { color: statusCfg.color },
+                      ]}
                     >
-                      {status.label}
+                      {statusCfg.label}
                     </Text>
                   </View>
                 </View>
                 <Text style={styles.orderDateLarge}>
                   Placed on{" "}
-                  {new Date(order.orderDate).toLocaleDateString("en-IN", {
+                  {new Date(order.createdAt).toLocaleDateString("en-IN", {
                     weekday: "long",
                     day: "numeric",
                     month: "long",
@@ -508,14 +396,6 @@ const OrderDetailsModal = ({
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Order Status</Text>
                 <OrderStatusTracker status={order.status} />
-                {order.status === "shipped" && order.trackingNumber && (
-                  <View style={styles.trackingInfo}>
-                    <Feather name="truck" size={wp("4%")} color={Colors.info} />
-                    <Text style={styles.trackingNumber}>
-                      Tracking: {order.trackingNumber}
-                    </Text>
-                  </View>
-                )}
               </View>
 
               {/* Delivery Address */}
@@ -523,19 +403,22 @@ const OrderDetailsModal = ({
                 <Text style={styles.modalSectionTitle}>Delivery Address</Text>
                 <View style={styles.addressCard}>
                   <Text style={styles.addressName}>
-                    {order.deliveryAddress.name}
+                    {order.deliveryAddress.contactName}
                   </Text>
                   <Text style={styles.addressText}>
-                    {order.deliveryAddress.address}
+                    {order.deliveryAddress.addressLine1}
                   </Text>
+                  {order.deliveryAddress.addressLine2 ? (
+                    <Text style={styles.addressText}>
+                      {order.deliveryAddress.addressLine2}
+                    </Text>
+                  ) : null}
                   <Text style={styles.addressText}>
-                    {order.deliveryAddress.city}
-                  </Text>
-                  <Text style={styles.addressText}>
-                    {order.deliveryAddress.pincode}
+                    {order.deliveryAddress.city}, {order.deliveryAddress.state}{" "}
+                    - {order.deliveryAddress.pincode}
                   </Text>
                   <Text style={styles.addressPhone}>
-                    {order.deliveryAddress.phone}
+                    📞 {order.deliveryAddress.phone}
                   </Text>
                 </View>
               </View>
@@ -545,51 +428,92 @@ const OrderDetailsModal = ({
                 <Text style={styles.modalSectionTitle}>
                   Items ({order.items.length})
                 </Text>
-                {order.items.map(({ productId, quantity }) => {
-                  const product = getProduct(productId);
-                  if (!product) return null;
-                  return (
-                    <View key={productId} style={styles.orderItem}>
-                      <Image
-                        source={{ uri: product.images[0] }}
-                        style={styles.orderItemImage}
-                      />
-                      <View style={styles.orderItemDetails}>
-                        <Text style={styles.orderItemName}>{product.name}</Text>
-                        <Text style={styles.orderItemManufacturer}>
-                          {product.brand ?? ""}
+                {order.items.map((item, index) => (
+                  <View key={index} style={styles.orderItem}>
+                    <Image
+                      source={{
+                        uri: getProductImage(item),
+                      }}
+                      style={styles.orderItemImage}
+                    />
+                    <View style={styles.orderItemDetails}>
+                      <Text style={styles.orderItemName}>{item.name}</Text>
+                      {/* Updated: Show electronics-specific details */}
+                      <Text style={styles.orderItemManufacturer}>
+                        {getItemSubtitle(item)}
+                      </Text>
+                      {item.dimensions && (
+                        <Text style={styles.orderItemSpec}>
+                          📐 {item.dimensions}
                         </Text>
-                        <Text style={styles.orderItemPrice}>
-                          ₹{product.price} × {quantity} = ₹
-                          {product.price * quantity}
+                      )}
+                      {item.weight && (
+                        <Text style={styles.orderItemSpec}>
+                          ⚖️ {item.weight}
                         </Text>
-                      </View>
+                      )}
+                      <Text style={styles.orderItemPrice}>
+                        ₹{item.sellingPrice} × {item.quantity} = ₹
+                        {item.lineTotal}
+                      </Text>
+                      {/* Show original price if discounted */}
+                      {item.originalPrice &&
+                        item.originalPrice > item.sellingPrice && (
+                          <Text style={styles.orderItemOriginalPrice}>
+                            MRP: ₹{item.originalPrice}
+                          </Text>
+                        )}
                     </View>
-                  );
-                })}
+                  </View>
+                ))}
               </View>
 
               {/* Payment Summary */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Payment Summary</Text>
                 <View style={styles.paymentRow}>
-                  <Text style={styles.paymentLabel}>Item Total</Text>
-                  <Text style={styles.paymentValue}>₹{total}</Text>
+                  <Text style={styles.paymentLabel}>Subtotal</Text>
+                  <Text style={styles.paymentValue}>₹{order.subtotal}</Text>
                 </View>
+                {order.couponDiscount > 0 && (
+                  <View style={styles.paymentRow}>
+                    <Text style={[styles.paymentLabel, { color: "#4CAF50" }]}>
+                      Discount
+                    </Text>
+                    <Text style={[styles.paymentValue, { color: "#4CAF50" }]}>
+                      -₹{order.couponDiscount}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.paymentRow}>
-                  <Text style={styles.paymentLabel}>Delivery Fee</Text>
-                  <Text
-                    style={[
-                      styles.paymentValue,
-                      { color: Colors.success, fontWeight: "700" },
-                    ]}
-                  >
-                    FREE
+                  <Text style={styles.paymentLabel}>Delivery</Text>
+                  <Text style={styles.paymentValue}>
+                    {order.deliveryCharge === 0
+                      ? "FREE"
+                      : `₹${order.deliveryCharge}`}
                   </Text>
                 </View>
+                <View style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>Platform Fee</Text>
+                  <Text style={styles.paymentValue}>₹{order.platformFee}</Text>
+                </View>
+                <View style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>GST</Text>
+                  <Text style={styles.paymentValue}>₹{order.gst}</Text>
+                </View>
+                {order.deliveryTip > 0 && (
+                  <View style={styles.paymentRow}>
+                    <Text style={styles.paymentLabel}>Tip</Text>
+                    <Text style={styles.paymentValue}>
+                      ₹{order.deliveryTip}
+                    </Text>
+                  </View>
+                )}
                 <View style={[styles.paymentRow, styles.paymentTotal]}>
                   <Text style={styles.paymentTotalLabel}>Total Paid</Text>
-                  <Text style={styles.paymentTotalValue}>₹{total}</Text>
+                  <Text style={styles.paymentTotalValue}>
+                    ₹{order.totalAmount}
+                  </Text>
                 </View>
                 <View style={styles.paymentMethod}>
                   <Feather
@@ -598,47 +522,9 @@ const OrderDetailsModal = ({
                     color={Colors.textMuted}
                   />
                   <Text style={styles.paymentMethodText}>
-                    Paid via {order.paymentMethod}
+                    Paid via {order.paymentMethod?.toUpperCase() || "UPI"}
                   </Text>
                 </View>
-              </View>
-
-              {/* Actions */}
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.downloadInvoiceBtn}>
-                  <Feather
-                    name="download"
-                    size={wp("4%")}
-                    color={Colors.textSecondary}
-                  />
-                  <Text style={styles.downloadInvoiceText}>
-                    Download Invoice
-                  </Text>
-                </TouchableOpacity>
-
-                {order.status === "delivered" ? (
-                  <TouchableOpacity style={styles.reorderBtn}>
-                    <Feather
-                      name="rotate-cw"
-                      size={wp("4%")}
-                      color={Colors.white}
-                    />
-                    <Text style={styles.reorderBtnText}>Reorder All Items</Text>
-                  </TouchableOpacity>
-                ) : (
-                  order.status !== "cancelled" && (
-                    <TouchableOpacity style={styles.contactSupportBtn}>
-                      <Feather
-                        name="message-circle"
-                        size={wp("4%")}
-                        color={Colors.primary}
-                      />
-                      <Text style={styles.contactSupportText}>
-                        Contact Support
-                      </Text>
-                    </TouchableOpacity>
-                  )
-                )}
               </View>
             </View>
           </ScrollView>
@@ -655,7 +541,7 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
       case "active":
         return {
           title: "No Active Orders",
-          subtitle: "You don't have any active orders at the moment",
+          subtitle: "You don't have any active orders",
           icon: "package",
         };
       case "completed":
@@ -673,7 +559,7 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
       default:
         return {
           title: "No Orders Yet",
-          subtitle: "Start shopping to place your first order",
+          subtitle: "Start shopping for electronics accessories",
           icon: "shopping-bag",
         };
     }
@@ -693,7 +579,7 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
       <Text style={styles.emptySub}>{message.subtitle}</Text>
       <TouchableOpacity
         style={styles.emptyBtn}
-        onPress={() => router.push("/" as any)}
+        onPress={() => router.push("/")}
         activeOpacity={0.8}
       >
         <Feather name="shopping-cart" size={wp("4%")} color={Colors.white} />
@@ -706,10 +592,49 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 const MyOrdersScreen = () => {
   const [activeTab, setActiveTab] = useState("all");
-  const [orders] = useState<Order[]>(MOCK_ORDERS);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const response = await apiGetMyOrders({ limit: 50 });
+      if (response.success) {
+        setOrders(response.data.orders);
+        console.log(`📦 Loaded ${response.data.orders.length} orders`);
+      }
+    } catch (error: any) {
+      console.error("Failed to fetch orders:", error);
+      Alert.alert("Error", error.message || "Failed to load orders");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  const handleCancelOrder = (orderId: string) => {
+    Alert.alert("Cancel Order", "Are you sure you want to cancel this order?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes, Cancel",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await apiCancelOrder(orderId, "Cancelled by customer");
+            Alert.alert("Success", "Order cancelled successfully");
+            fetchOrders();
+          } catch (error: any) {
+            Alert.alert("Error", error.message || "Failed to cancel order");
+          }
+        },
+      },
+    ]);
+  };
 
   const filteredOrders = orders.filter((order) => {
     if (activeTab === "all") return true;
@@ -727,14 +652,32 @@ const MyOrdersScreen = () => {
     completed: orders.filter((o) => o.status === "delivered").length,
   };
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1500);
-  };
+    await fetchOrders();
+    setRefreshing(false);
+  }, [fetchOrders]);
+
+  if (loading) {
+    return (
+      <View
+        style={[
+          styles.root,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <StatusBar barStyle="dark-content" backgroundColor="#00A884" />
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: hp("2%"), color: Colors.textSecondary }}>
+          Loading orders...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.accent} />
+      <StatusBar barStyle="dark-content" backgroundColor="#00A884" />
 
       {/* Header */}
       <View style={styles.header}>
@@ -744,12 +687,10 @@ const MyOrdersScreen = () => {
             activeOpacity={0.8}
             onPress={() => router.back()}
           >
-            <Feather name="arrow-left" size={wp("5.5%")} color={Colors.white} />
+            <Feather name="arrow-left" size={wp("5.5%")} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Orders</Text>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Feather name="search" size={wp("5%")} color={Colors.white} />
-          </TouchableOpacity>
+          <View style={{ width: wp("10%") }} />
         </View>
 
         {/* Stats */}
@@ -760,14 +701,14 @@ const MyOrdersScreen = () => {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: Colors.warning }]}>
+            <Text style={[styles.statNumber, { color: "#FF9800" }]}>
               {stats.active}
             </Text>
             <Text style={styles.statLabel}>Active</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: Colors.accentLight }]}>
+            <Text style={[styles.statNumber, { color: "#fff" }]}>
               {stats.completed}
             </Text>
             <Text style={styles.statLabel}>Completed</Text>
@@ -814,7 +755,7 @@ const MyOrdersScreen = () => {
       ) : (
         <FlatList
           data={filteredOrders}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item._id}
           renderItem={({ item }) => (
             <OrderCard
               order={item}
@@ -822,12 +763,17 @@ const MyOrdersScreen = () => {
                 setSelectedOrder(item);
                 setShowOrderModal(true);
               }}
+              onCancel={() => handleCancelOrder(item._id)}
             />
           )}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.primary}
+            />
           }
         />
       )}
@@ -841,19 +787,16 @@ const MyOrdersScreen = () => {
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles (keep existing styles, add new ones below) ────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  root: { flex: 1, backgroundColor: Colors.background },
 
   // Header
   header: {
     paddingTop: Platform.OS === "ios" ? hp("6%") : hp("6%"),
     paddingBottom: hp("2%"),
     paddingHorizontal: wp("5%"),
-    backgroundColor: Colors.accent,
+    backgroundColor: "#00A884",
     borderBottomLeftRadius: wp("6%"),
     borderBottomRightRadius: wp("6%"),
   },
@@ -871,19 +814,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: {
-    fontSize: wp("5%"),
-    fontWeight: "800",
-    color: Colors.white,
-  },
-  headerIcon: {
-    width: wp("10%"),
-    height: wp("10%"),
-    borderRadius: wp("5%"),
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  headerTitle: { fontSize: wp("5%"), fontWeight: "800", color: "#fff" },
   statsRow: {
     flexDirection: "row",
     backgroundColor: "rgba(255,255,255,0.15)",
@@ -892,15 +823,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp("3%"),
     marginTop: hp("1%"),
   },
-  statCard: {
-    flex: 1,
-    alignItems: "center",
-  },
-  statNumber: {
-    fontSize: wp("4.5%"),
-    fontWeight: "800",
-    color: Colors.white,
-  },
+  statCard: { flex: 1, alignItems: "center" },
+  statNumber: { fontSize: wp("4.5%"), fontWeight: "800", color: "#fff" },
   statLabel: {
     fontSize: wp("2.8%"),
     color: "rgba(255,255,255,0.8)",
@@ -919,9 +843,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  tabsScroll: {
-    paddingHorizontal: wp("4%"),
-  },
+  tabsScroll: { paddingHorizontal: wp("4%") },
   tab: {
     flexDirection: "row",
     alignItems: "center",
@@ -930,17 +852,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp("4%"),
     position: "relative",
   },
-  tabActive: {
-    backgroundColor: Colors.primaryLight,
-  },
-  tabText: {
-    fontSize: wp("3.2%"),
-    fontWeight: "600",
-    color: Colors.textMuted,
-  },
-  tabTextActive: {
-    color: Colors.primary,
-  },
+  tabActive: { backgroundColor: Colors.primaryLight },
+  tabText: { fontSize: wp("3.2%"), fontWeight: "600", color: Colors.textMuted },
+  tabTextActive: { color: Colors.primary },
   tabIndicator: {
     position: "absolute",
     bottom: 0,
@@ -964,9 +878,9 @@ const styles = StyleSheet.create({
     borderRadius: wp("4%"),
     marginBottom: hp("1.5%"),
     padding: wp("4%"),
-    shadowColor: Colors.shadow,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
   },
@@ -976,11 +890,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: hp("1.5%"),
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   orderIcon: {
     width: wp("10%"),
     height: wp("10%"),
@@ -1007,19 +917,13 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  statusText: {
-    fontSize: wp("2.8%"),
-    fontWeight: "700",
-  },
+  statusText: { fontSize: wp("2.8%"), fontWeight: "700" },
   itemsPreview: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: hp("1%"),
   },
-  previewItem: {
-    position: "relative",
-    marginRight: wp("2%"),
-  },
+  previewItem: { position: "relative", marginRight: wp("2%") },
   previewImage: {
     width: wp("12%"),
     height: wp("12%"),
@@ -1031,7 +935,7 @@ const styles = StyleSheet.create({
     bottom: -4,
     right: -4,
     backgroundColor: Colors.primary,
-    color: Colors.white,
+    color: "#fff",
     fontSize: wp("2.2%"),
     fontWeight: "700",
     paddingHorizontal: wp("1.2%"),
@@ -1058,10 +962,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: hp("1.5%"),
   },
-  itemsSummaryText: {
-    fontSize: wp("3.2%"),
-    color: Colors.textSecondary,
-  },
+  itemsSummaryText: { fontSize: wp("3.2%"), color: Colors.textSecondary },
 
   // Tracker
   trackerContainer: {
@@ -1071,10 +972,7 @@ const styles = StyleSheet.create({
     marginBottom: hp("1.5%"),
     paddingHorizontal: wp("2%"),
   },
-  trackerStep: {
-    flex: 1,
-    alignItems: "center",
-  },
+  trackerStep: { flex: 1, alignItems: "center" },
   trackerIconWrapper: {
     alignItems: "center",
     position: "relative",
@@ -1091,10 +989,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 2,
   },
-  trackerIconCompleted: {
-    backgroundColor: Colors.success,
-    borderColor: Colors.success,
-  },
+  trackerIconCompleted: { backgroundColor: "#4CAF50", borderColor: "#4CAF50" },
   trackerIconCurrent: {
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
@@ -1108,19 +1003,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
     zIndex: 1,
   },
-  trackerLineCompleted: {
-    backgroundColor: Colors.success,
-  },
+  trackerLineCompleted: { backgroundColor: "#4CAF50" },
   trackerLabel: {
-    fontSize: wp("2.2%"),
+    fontSize: wp("2%"),
     color: Colors.textMuted,
     marginTop: hp("0.5%"),
     textAlign: "center",
   },
-  trackerLabelActive: {
-    color: Colors.textPrimary,
-    fontWeight: "600",
-  },
+  trackerLabelActive: { color: Colors.textPrimary, fontWeight: "600" },
   cancelledTracker: {
     flexDirection: "row",
     alignItems: "center",
@@ -1131,18 +1021,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEE8EE",
     borderRadius: wp("2%"),
   },
-  cancelledText: {
-    fontSize: wp("3.5%"),
-    fontWeight: "600",
-    color: Colors.error,
-  },
+  cancelledText: { fontSize: wp("3.5%"), fontWeight: "600", color: "#E53935" },
 
   // Card Footer
   cardFooter: {
     flexDirection: "row",
     alignItems: "center",
     borderTopWidth: 1,
-    borderTopColor: Colors.divider,
+    borderTopColor: Colors.border,
     paddingTop: hp("1.5%"),
   },
   footerBtn: {
@@ -1157,9 +1043,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontWeight: "500",
   },
-  cancelBtn: {
-    marginLeft: wp("2%"),
-  },
+  cancelBtn: { marginLeft: wp("2%") },
   trackBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1210,20 +1094,16 @@ const styles = StyleSheet.create({
     paddingVertical: hp("1.5%"),
     borderRadius: wp("5%"),
   },
-  emptyBtnText: {
-    fontSize: wp("3.8%"),
-    color: Colors.white,
-    fontWeight: "700",
-  },
+  emptyBtnText: { fontSize: wp("3.8%"), color: "#fff", fontWeight: "700" },
 
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: Colors.overlay,
+    backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: Colors.white,
+    backgroundColor: "#fff",
     borderTopLeftRadius: wp("6%"),
     borderTopRightRadius: wp("6%"),
     maxHeight: hp("90%"),
@@ -1250,12 +1130,8 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: Colors.textPrimary,
   },
-  modalBody: {
-    padding: wp("5%"),
-  },
-  modalSection: {
-    marginBottom: hp("2.5%"),
-  },
+  modalBody: { padding: wp("5%") },
+  modalSection: { marginBottom: hp("2.5%") },
   modalSectionTitle: {
     fontSize: wp("4%"),
     fontWeight: "800",
@@ -1281,28 +1157,8 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.6%"),
     borderRadius: wp("4%"),
   },
-  statusTextLarge: {
-    fontSize: wp("3.2%"),
-    fontWeight: "700",
-  },
-  orderDateLarge: {
-    fontSize: wp("3.2%"),
-    color: Colors.textMuted,
-  },
-  trackingInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.info + "18",
-    padding: wp("3%"),
-    borderRadius: wp("3%"),
-    marginTop: hp("1.5%"),
-    gap: wp("2%"),
-  },
-  trackingNumber: {
-    fontSize: wp("3.2%"),
-    color: Colors.info,
-    fontWeight: "600",
-  },
+  statusTextLarge: { fontSize: wp("3.2%"), fontWeight: "700" },
+  orderDateLarge: { fontSize: wp("3.2%"), color: Colors.textMuted },
   addressCard: {
     backgroundColor: Colors.surfaceAlt,
     padding: wp("4%"),
@@ -1330,17 +1186,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: hp("1%"),
     borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
+    borderBottomColor: Colors.border,
   },
   orderItemImage: {
     width: wp("15%"),
     height: wp("15%"),
     marginRight: wp("3%"),
     borderRadius: wp("2%"),
+    backgroundColor: Colors.surfaceAlt,
   },
-  orderItemDetails: {
-    flex: 1,
-  },
+  orderItemDetails: { flex: 1 },
   orderItemName: {
     fontSize: wp("3.5%"),
     fontWeight: "600",
@@ -1352,20 +1207,30 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginBottom: 2,
   },
+  // New: Item specifications
+  orderItemSpec: {
+    fontSize: wp("2.5%"),
+    color: Colors.textSecondary,
+    marginBottom: 1,
+  },
   orderItemPrice: {
     fontSize: wp("3.2%"),
     color: Colors.primary,
     fontWeight: "600",
+  },
+  // New: Original price
+  orderItemOriginalPrice: {
+    fontSize: wp("2.5%"),
+    color: Colors.textMuted,
+    textDecorationLine: "line-through",
+    marginTop: 1,
   },
   paymentRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: hp("1%"),
   },
-  paymentLabel: {
-    fontSize: wp("3.2%"),
-    color: Colors.textSecondary,
-  },
+  paymentLabel: { fontSize: wp("3.2%"), color: Colors.textSecondary },
   paymentValue: {
     fontSize: wp("3.2%"),
     color: Colors.textPrimary,
@@ -1393,56 +1258,7 @@ const styles = StyleSheet.create({
     marginTop: hp("1%"),
     gap: wp("2%"),
   },
-  paymentMethodText: {
-    fontSize: wp("3%"),
-    color: Colors.textMuted,
-  },
-  modalActions: {
-    gap: hp("1.5%"),
-    marginTop: hp("1%"),
-  },
-  downloadInvoiceBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: wp("2%"),
-    backgroundColor: Colors.surfaceAlt,
-    paddingVertical: hp("1.5%"),
-    borderRadius: wp("4%"),
-  },
-  downloadInvoiceText: {
-    fontSize: wp("3.5%"),
-    fontWeight: "600",
-    color: Colors.textSecondary,
-  },
-  reorderBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: wp("2%"),
-    backgroundColor: Colors.primary,
-    paddingVertical: hp("1.5%"),
-    borderRadius: wp("4%"),
-  },
-  reorderBtnText: {
-    fontSize: wp("3.8%"),
-    fontWeight: "700",
-    color: Colors.white,
-  },
-  contactSupportBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: wp("2%"),
-    backgroundColor: Colors.primaryLight,
-    paddingVertical: hp("1.5%"),
-    borderRadius: wp("4%"),
-  },
-  contactSupportText: {
-    fontSize: wp("3.5%"),
-    fontWeight: "600",
-    color: Colors.primary,
-  },
+  paymentMethodText: { fontSize: wp("3%"), color: Colors.textMuted },
 });
 
 export default MyOrdersScreen;

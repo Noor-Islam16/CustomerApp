@@ -1,5 +1,5 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -8,6 +8,7 @@ import {
   Dimensions,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
@@ -22,9 +23,17 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../../constants/colors";
+import {
+  apiCompleteProfile,
+  apiGetMe,
+  apiSendOtp,
+  apiVerifyOtp,
+  getToken,
+  saveToken,
+} from "../services/api";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-type Screen = "phone" | "otp";
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Screen = "phone" | "otp" | "profile";
 
 interface CountryCode {
   flag: string;
@@ -32,28 +41,99 @@ interface CountryCode {
   dial: string;
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-const { width, height } = Dimensions.get("window");
+interface ProfileForm {
+  contactName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  gstNumber: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+interface FieldError {
+  contactName?: string;
+  addressLine1?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  gstNumber?: string;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const { height } = Dimensions.get("window");
 const COUNTRY: CountryCode = { flag: "🇮🇳", code: "IN", dial: "+91" };
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 30;
+const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const isGstValid = (gst: string) => GST_REGEX.test(gst.trim().toUpperCase());
 
-// ─── Main Component ──────────────────────────────────────────────────────────
+const INDIAN_STATES = [
+  "Andhra Pradesh",
+  "Assam",
+  "Bihar",
+  "Delhi",
+  "Gujarat",
+  "Haryana",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Tamil Nadu",
+  "Telangana",
+  "Uttar Pradesh",
+  "West Bengal",
+];
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 const LoginScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
-
-  // ── State ──
+  // ── Screen state ──
   const [screen, setScreen] = useState<Screen>("phone");
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // ── Phone / OTP state ──
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendTimer, setResendTimer] = useState(0);
-  const [otpSent, setOtpSent] = useState(false);
+
+  // ── Profile form state ──
+  const [form, setForm] = useState<ProfileForm>({
+    contactName: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    pincode: "",
+    gstNumber: "",
+    latitude: undefined,
+    longitude: undefined,
+  });
+  const [fieldErrors, setFieldErrors] = useState<FieldError>({});
+  const [activeField, setActiveField] = useState<string | null>(null);
+  const [showStateDropdown, setShowStateDropdown] = useState(false);
+  const [stateSearch, setStateSearch] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<"auto" | "manual">(
+    "manual",
+  );
+  const [locationLoading, setLocationLoading] = useState(false);
 
   // ── Refs ──
   const otpRefs = useRef<(TextInput | null)[]>([]);
   const phoneRef = useRef<TextInput>(null);
+  const nameRef = useRef<TextInput>(null);
+  const addr1Ref = useRef<TextInput>(null);
+  const addr2Ref = useRef<TextInput>(null);
+  const cityRef = useRef<TextInput>(null);
+  const pincodeRef = useRef<TextInput>(null);
+  const gstRef = useRef<TextInput>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Animations ──
@@ -62,33 +142,59 @@ const LoginScreen: React.FC = () => {
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(0.5)).current;
   const cardFadeAnim = useRef(new Animated.Value(0)).current;
+  const successScale = useRef(new Animated.Value(0.7)).current;
+  const successOpacity = useRef(new Animated.Value(0)).current;
 
-  // ── Entrance animation ──
+  // ── Auto-login check ──────────────────────────────────────────────────────
   useEffect(() => {
-    Animated.sequence([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.parallel([
-        Animated.spring(logoScale, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(cardFadeAnim, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
+    const checkExistingAuth = async () => {
+      try {
+        const token = await getToken();
+        if (token) {
+          try {
+            const userData = await apiGetMe();
+            if (userData.success && userData.user) {
+              if (userData.user.isProfileComplete) {
+                router.replace("/(tabs)/home");
+              }
+              return;
+            }
+          } catch {
+            // Token expired — fall through to login
+          }
+        }
+      } catch (e) {
+        console.error("Auth check failed:", e);
+      } finally {
+        setCheckingAuth(false);
+        Animated.sequence([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.parallel([
+            Animated.spring(logoScale, {
+              toValue: 1,
+              tension: 50,
+              friction: 7,
+              useNativeDriver: true,
+            }),
+            Animated.timing(cardFadeAnim, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]).start();
+      }
+    };
+    checkExistingAuth();
   }, []);
 
-  // ── Re-animate on screen change ──
+  // ── Re-animate card on screen change ──
   useEffect(() => {
+    if (checkingAuth) return;
     cardFadeAnim.setValue(0);
     slideAnim.setValue(30);
     Animated.parallel([
@@ -124,7 +230,7 @@ const LoginScreen: React.FC = () => {
     };
   }, [resendTimer]);
 
-  // ── Shake animation ──
+  // ── Shake ──
   const triggerShake = useCallback(() => {
     shakeAnim.setValue(0);
     Animated.sequence([
@@ -156,10 +262,9 @@ const LoginScreen: React.FC = () => {
     ]).start();
   }, [shakeAnim]);
 
-  // ── Phone validation ──
   const isPhoneValid = phone.replace(/\s/g, "").length === 10;
 
-  // ── Send OTP ──
+  // ── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async () => {
     if (!isPhoneValid) {
       setError("Please enter a valid 10-digit mobile number.");
@@ -169,40 +274,32 @@ const LoginScreen: React.FC = () => {
     setError("");
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1500));
-      setOtpSent(true);
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setScreen("otp");
       setTimeout(() => otpRefs.current[0]?.focus(), 400);
-    } catch {
-      setError("Failed to send OTP. Please try again.");
+    } catch (err: any) {
+      setError(err.message || "Failed to send OTP. Please try again.");
       triggerShake();
     } finally {
       setLoading(false);
     }
   };
 
-  // ── OTP Input handler ──
+  // ── OTP handlers ──
   const handleOtpChange = (value: string, index: number) => {
     const digit = value.replace(/[^0-9]/g, "").slice(-1);
     const newOtp = [...otp];
     newOtp[index] = digit;
     setOtp(newOtp);
     setError("");
-
-    if (digit && index < OTP_LENGTH - 1) {
-      otpRefs.current[index + 1]?.focus();
-    }
-
+    if (digit && index < OTP_LENGTH - 1) otpRefs.current[index + 1]?.focus();
     if (digit && index === OTP_LENGTH - 1) {
       const filled = [...newOtp.slice(0, OTP_LENGTH - 1), digit];
-      if (filled.every((d) => d !== "")) {
-        handleVerifyOtp(filled.join(""));
-      }
+      if (filled.every((d) => d !== "")) handleVerifyOtp(filled.join(""));
     }
   };
 
-  // ── OTP backspace handler ──
   const handleOtpKeyPress = (key: string, index: number) => {
     if (key === "Backspace") {
       const newOtp = [...otp];
@@ -217,8 +314,7 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  // ── Verify OTP ──
-  // ── Verify OTP ──
+  // ── Verify OTP ────────────────────────────────────────────────────────────
   const handleVerifyOtp = async (code?: string) => {
     const otpCode = code ?? otp.join("");
     if (otpCode.length < OTP_LENGTH) {
@@ -229,19 +325,18 @@ const LoginScreen: React.FC = () => {
     setError("");
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1500));
+      const data = await apiVerifyOtp(phone, otpCode);
+      await saveToken(data.token);
 
-      // Check if OTP matches "252002"
-      if (otpCode === "252002") {
-        router.push("/(tabs)/home");
+      if (data.isNewUser || !data.isProfileComplete) {
+        // New user — show profile form (same login UI)
+        setScreen("profile");
+        setTimeout(() => nameRef.current?.focus(), 400);
       } else {
-        setError("Invalid OTP. Please try again.");
-        triggerShake();
-        setOtp(Array(OTP_LENGTH).fill(""));
-        setTimeout(() => otpRefs.current[0]?.focus(), 100);
+        router.replace("/(tabs)/home");
       }
-    } catch {
-      setError("Invalid OTP. Please try again.");
+    } catch (err: any) {
+      setError(err.message || "Invalid OTP. Please try again.");
       triggerShake();
       setOtp(Array(OTP_LENGTH).fill(""));
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
@@ -250,24 +345,180 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  // ── Resend OTP ──
+  // ── Resend OTP ────────────────────────────────────────────────────────────
   const handleResend = async () => {
     if (resendTimer > 0) return;
     setLoading(true);
     setOtp(Array(OTP_LENGTH).fill(""));
     setError("");
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      await apiSendOtp(phone);
       setResendTimer(RESEND_COOLDOWN);
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
+    } catch (err: any) {
+      setError(err.message || "Failed to resend OTP.");
+      triggerShake();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Profile form helpers ──
+  const updateForm = (key: keyof ProfileForm) => (val: string) => {
+    setForm((prev) => ({ ...prev, [key]: val }));
+    if (fieldErrors[key as keyof FieldError])
+      setFieldErrors((prev) => ({ ...prev, [key]: undefined }));
+  };
+
+  const isAutoApproval = form.gstNumber.trim() && isGstValid(form.gstNumber);
+
+  // ── Auto Location Detection ───────────────────────────────────────────────
+  const handlePickLocation = async () => {
+    setLocationLoading(true);
+    setError(""); // Clear any previous errors
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setError("Location permission is required to auto-fill address.");
+        setLocationLoading(false);
+        return;
+      }
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const { latitude, longitude } = location.coords;
+      const [address] = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude,
+      });
+      if (address) {
+        setForm((prev) => ({
+          ...prev,
+          addressLine1: address.street || address.name || prev.addressLine1,
+          city: address.city || address.subregion || prev.city,
+          state: address.region || prev.state,
+          pincode: address.postalCode || prev.pincode,
+          latitude,
+          longitude,
+        }));
+        // Clear related field errors
+        setFieldErrors((prev) => ({
+          ...prev,
+          addressLine1: undefined,
+          city: undefined,
+          state: undefined,
+          pincode: undefined,
+        }));
+      }
+    } catch {
+      setError("Could not fetch location. Please enter manually.");
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const validateProfile = (): boolean => {
+    const e: FieldError = {};
+    if (!form.contactName.trim()) e.contactName = "Contact name is required.";
+    else if (form.contactName.trim().length < 2)
+      e.contactName = "Please enter a valid name.";
+    if (!form.addressLine1.trim()) e.addressLine1 = "Address is required.";
+    if (!form.city.trim()) e.city = "City is required.";
+    if (!form.state.trim()) e.state = "State is required.";
+    if (!form.pincode.trim()) e.pincode = "Pincode is required.";
+    else if (!/^\d{6}$/.test(form.pincode.trim()))
+      e.pincode = "Enter a valid 6-digit pincode.";
+    if (form.gstNumber && !isGstValid(form.gstNumber))
+      e.gstNumber = "Invalid GST number format.";
+    setFieldErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  // ── Submit profile ────────────────────────────────────────────────────────
+  const handleSubmitProfile = async () => {
+    if (!validateProfile()) {
+      triggerShake();
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await apiCompleteProfile({
+        contactName: form.contactName,
+        addressLine1: form.addressLine1,
+        addressLine2: form.addressLine2,
+        city: form.city,
+        state: form.state,
+        pincode: form.pincode,
+        gstNumber: form.gstNumber,
+        latitude: form.latitude ?? null,
+        longitude: form.longitude ?? null,
+      });
+      setApprovalStatus(data.approvalStatus as "auto" | "manual");
+      setShowSuccessModal(true);
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.spring(successScale, {
+            toValue: 1,
+            tension: 50,
+            friction: 7,
+            useNativeDriver: true,
+          }),
+          Animated.timing(successOpacity, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 100);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+      triggerShake();
     } finally {
       setLoading(false);
     }
   };
 
   const otpFilled = otp.filter(Boolean).length;
+  const filteredStates = INDIAN_STATES.filter((s) =>
+    s.toLowerCase().includes(stateSearch.toLowerCase()),
+  );
 
-  // ─────────────────────────────────────────────────────────────────────────
+  const inputBorderColor = (field: keyof FieldError) =>
+    fieldErrors[field]
+      ? Colors.error
+      : activeField === field
+        ? Colors.primary
+        : Colors.border;
+  const inputBg = (field: keyof FieldError) =>
+    fieldErrors[field]
+      ? "#FFF5F5"
+      : activeField === field
+        ? (Colors.primaryLight ?? "#EEF3FF")
+        : Colors.surfaceAlt;
+
+  // ── Auth check loading screen ──
+  if (checkingAuth) {
+    return (
+      <View
+        style={[
+          styles.root,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.gradientStart}
+        />
+        <View style={styles.gradientBg}>
+          <View style={styles.gradientOverlay} />
+        </View>
+        <ActivityIndicator size="large" color={Colors.white} />
+        <Text style={styles.autoLoginText}>Checking login...</Text>
+      </View>
+    );
+  }
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
       <StatusBar
@@ -275,7 +526,7 @@ const LoginScreen: React.FC = () => {
         backgroundColor={Colors.gradientStart}
       />
 
-      {/* ── Animated Background ── */}
+      {/* Background */}
       <Animated.View style={[styles.gradientBg, { opacity: fadeAnim }]}>
         <View style={styles.gradientOverlay} />
       </Animated.View>
@@ -289,15 +540,20 @@ const LoginScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Header ── */}
+          {/* Header row */}
           <View style={styles.header}>
-            {screen === "otp" && (
+            {(screen === "otp" || screen === "profile") && (
               <TouchableOpacity
                 style={styles.backBtn}
                 onPress={() => {
-                  setScreen("phone");
-                  setOtp(Array(OTP_LENGTH).fill(""));
-                  setError("");
+                  if (screen === "otp") {
+                    setScreen("phone");
+                    setOtp(Array(OTP_LENGTH).fill(""));
+                    setError("");
+                  } else if (screen === "profile") {
+                    setScreen("otp");
+                    setError("");
+                  }
                 }}
                 activeOpacity={0.7}
               >
@@ -311,7 +567,7 @@ const LoginScreen: React.FC = () => {
             <View style={styles.headerSpacer} />
           </View>
 
-          {/* ── Logo Section ── */}
+          {/* Logo */}
           <Animated.View
             style={[
               styles.logoSection,
@@ -320,13 +576,15 @@ const LoginScreen: React.FC = () => {
           >
             <View style={styles.logoContainer}>
               <Image
-                source={require("../../assets/images/logo.png")}
+                source={require("../../assets/images/logo.jpeg")}
                 style={styles.logoImage}
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.appName}>Customer App</Text>
-            <Text style={styles.tagline}>Your Health • Your Way</Text>
+            <Text style={styles.appName}>JholeSaler</Text>
+            <Text style={styles.tagline}>
+              Electronics Accessories In Your Way.
+            </Text>
           </Animated.View>
 
           {/* ── Main Card ── */}
@@ -342,8 +600,8 @@ const LoginScreen: React.FC = () => {
               },
             ]}
           >
-            {screen === "phone" ? (
-              /* ── PHONE SCREEN ── */
+            {/* ══ PHONE SCREEN ══════════════════════════════════════════════ */}
+            {screen === "phone" && (
               <>
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardTitle}>Welcome Back</Text>
@@ -364,7 +622,6 @@ const LoginScreen: React.FC = () => {
                         color={Colors.textMuted}
                       />
                     </View>
-
                     <TextInput
                       ref={phoneRef}
                       style={[
@@ -385,7 +642,6 @@ const LoginScreen: React.FC = () => {
                       autoFocus
                     />
                   </View>
-
                   {!!error && (
                     <View style={styles.errorContainer}>
                       <Ionicons
@@ -429,8 +685,10 @@ const LoginScreen: React.FC = () => {
                   <Text style={styles.legalLink}>Privacy Policy</Text>
                 </Text>
               </>
-            ) : (
-              /* ── OTP SCREEN ── */
+            )}
+
+            {/* ══ OTP SCREEN ════════════════════════════════════════════════ */}
+            {screen === "otp" && (
               <>
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardTitle}>Verify OTP</Text>
@@ -465,7 +723,6 @@ const LoginScreen: React.FC = () => {
                       />
                     ))}
                   </View>
-
                   {!!error && (
                     <View style={styles.errorContainer}>
                       <Ionicons
@@ -477,20 +734,6 @@ const LoginScreen: React.FC = () => {
                       <Text style={styles.errorText}>{error}</Text>
                     </View>
                   )}
-
-                  <View style={styles.progressRow}>
-                    {Array(OTP_LENGTH)
-                      .fill(0)
-                      .map((_, i) => (
-                        <View
-                          key={i}
-                          style={[
-                            styles.progressDot,
-                            i < otpFilled && styles.progressDotFilled,
-                          ]}
-                        />
-                      ))}
-                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -552,38 +795,738 @@ const LoginScreen: React.FC = () => {
               </>
             )}
 
-            {/* ── Create Account Link ── */}
-            <View style={styles.signupContainer}>
-              <View style={styles.divider} />
-              <View style={styles.signupRow}>
-                <Text style={styles.signupLabel}>Don't have an account? </Text>
+            {/* ══ PROFILE SETUP (NEW USER) ════════════════════════════════ */}
+            {screen === "profile" && (
+              <>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>Complete Profile</Text>
+                  <Text style={styles.cardSubtitle}>
+                    You're new here! Just a few details to get you started.
+                  </Text>
+                </View>
+
+                {/* ─ Contact Name ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>
+                    Contact Person Name{" "}
+                    <Text style={{ color: Colors.error }}>*</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: inputBorderColor("contactName"),
+                        backgroundColor: inputBg("contactName"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="user"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "contactName"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={nameRef}
+                      style={styles.profileInput}
+                      placeholder="e.g. Rajesh Patel"
+                      placeholderTextColor={Colors.textMuted}
+                      value={form.contactName}
+                      onChangeText={updateForm("contactName")}
+                      onFocus={() => setActiveField("contactName")}
+                      onBlur={() => setActiveField(null)}
+                      returnKeyType="next"
+                      onSubmitEditing={() => addr1Ref.current?.focus()}
+                      autoCapitalize="words"
+                    />
+                  </View>
+                  {!!fieldErrors.contactName && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.contactName}
+                    </Text>
+                  )}
+                </View>
+
+                {/* ─ Verified phone display ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>Verified Mobile</Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: Colors.primary,
+                        backgroundColor: Colors.primaryLight ?? "#EEF3FF",
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="phone"
+                      size={wp("4.5%")}
+                      color={Colors.primary}
+                      style={styles.profileInputIcon}
+                    />
+                    <Text
+                      style={[
+                        styles.profileInput,
+                        { color: Colors.primary, fontWeight: "700" },
+                      ]}
+                    >
+                      +91 {phone}
+                    </Text>
+                    <MaterialCommunityIcons
+                      name="check-decagram"
+                      size={wp("4.5%")}
+                      color={Colors.success ?? "#22C55E"}
+                    />
+                  </View>
+                </View>
+
+                {/* ─ Divider ─ */}
+                <View style={styles.profileDivider}>
+                  <View style={styles.profileDividerLine} />
+                  <Text style={styles.profileDividerText}>
+                    Delivery Address
+                  </Text>
+                  <View style={styles.profileDividerLine} />
+                </View>
+
+                {/* ─ Address Line 1 ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>
+                    Address Line 1{" "}
+                    <Text style={{ color: Colors.error }}>*</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: inputBorderColor("addressLine1"),
+                        backgroundColor: inputBg("addressLine1"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="map-pin"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "addressLine1"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={addr1Ref}
+                      style={styles.profileInput}
+                      placeholder="Shop / Flat No., Building Name"
+                      placeholderTextColor={Colors.textMuted}
+                      value={form.addressLine1}
+                      onChangeText={updateForm("addressLine1")}
+                      onFocus={() => setActiveField("addressLine1")}
+                      onBlur={() => setActiveField(null)}
+                      returnKeyType="next"
+                      onSubmitEditing={() => addr2Ref.current?.focus()}
+                    />
+                  </View>
+                  {!!fieldErrors.addressLine1 && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.addressLine1}
+                    </Text>
+                  )}
+                </View>
+
+                {/* ─ Address Line 2 ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>
+                    Address Line 2{" "}
+                    <Text style={styles.optionalText}>(Optional)</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor:
+                          activeField === "addressLine2"
+                            ? Colors.primary
+                            : Colors.border,
+                        backgroundColor:
+                          activeField === "addressLine2"
+                            ? (Colors.primaryLight ?? "#EEF3FF")
+                            : Colors.surfaceAlt,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="navigation"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "addressLine2"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={addr2Ref}
+                      style={styles.profileInput}
+                      placeholder="Street, Area, Landmark"
+                      placeholderTextColor={Colors.textMuted}
+                      value={form.addressLine2}
+                      onChangeText={updateForm("addressLine2")}
+                      onFocus={() => setActiveField("addressLine2")}
+                      onBlur={() => setActiveField(null)}
+                      returnKeyType="next"
+                      onSubmitEditing={() => cityRef.current?.focus()}
+                    />
+                  </View>
+                </View>
+
+                {/* ─ City + State row ─ */}
+                <View style={styles.twoColRow}>
+                  <View style={[styles.profileFieldWrap, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>
+                      City <Text style={{ color: Colors.error }}>*</Text>
+                    </Text>
+                    <View
+                      style={[
+                        styles.profileInputWrapper,
+                        {
+                          borderColor: inputBorderColor("city"),
+                          backgroundColor: inputBg("city"),
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="home"
+                        size={wp("4%")}
+                        color={
+                          activeField === "city"
+                            ? Colors.primary
+                            : Colors.textMuted
+                        }
+                        style={styles.profileInputIcon}
+                      />
+                      <TextInput
+                        ref={cityRef}
+                        style={[styles.profileInput, { fontSize: wp("3.6%") }]}
+                        placeholder="e.g. Surat"
+                        placeholderTextColor={Colors.textMuted}
+                        value={form.city}
+                        onChangeText={updateForm("city")}
+                        onFocus={() => setActiveField("city")}
+                        onBlur={() => setActiveField(null)}
+                        returnKeyType="next"
+                        autoCapitalize="words"
+                      />
+                    </View>
+                    {!!fieldErrors.city && (
+                      <Text style={styles.fieldErrorText}>
+                        {fieldErrors.city}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={[styles.profileFieldWrap, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>
+                      State <Text style={{ color: Colors.error }}>*</Text>
+                    </Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.profileInputWrapper,
+                        {
+                          borderColor: inputBorderColor("state"),
+                          backgroundColor: inputBg("state"),
+                        },
+                      ]}
+                      onPress={() => setShowStateDropdown(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Feather
+                        name="map"
+                        size={wp("4%")}
+                        color={form.state ? Colors.primary : Colors.textMuted}
+                        style={styles.profileInputIcon}
+                      />
+                      <Text
+                        style={[
+                          styles.profileInput,
+                          {
+                            fontSize: wp("3.6%"),
+                            color: form.state
+                              ? Colors.textPrimary
+                              : Colors.textMuted,
+                          },
+                        ]}
+                      >
+                        {form.state || "Select"}
+                      </Text>
+                      <Ionicons
+                        name="chevron-down"
+                        size={wp("4%")}
+                        color={Colors.textMuted}
+                      />
+                    </TouchableOpacity>
+                    {!!fieldErrors.state && (
+                      <Text style={styles.fieldErrorText}>
+                        {fieldErrors.state}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* ─ Pincode ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>
+                    Pincode <Text style={{ color: Colors.error }}>*</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: inputBorderColor("pincode"),
+                        backgroundColor: inputBg("pincode"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="hash"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "pincode"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={pincodeRef}
+                      style={styles.profileInput}
+                      placeholder="e.g. 395003"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      value={form.pincode}
+                      onChangeText={(t) =>
+                        updateForm("pincode")(t.replace(/[^0-9]/g, ""))
+                      }
+                      onFocus={() => setActiveField("pincode")}
+                      onBlur={() => setActiveField(null)}
+                      returnKeyType="next"
+                      onSubmitEditing={() => gstRef.current?.focus()}
+                    />
+                  </View>
+                  {!!fieldErrors.pincode && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.pincode}
+                    </Text>
+                  )}
+                </View>
+                {/* ─ Auto Location Detection Button ─ */}
                 <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => navigation.navigate("signup")}
+                  style={styles.mapPickerBtn}
+                  onPress={handlePickLocation}
+                  activeOpacity={0.8}
+                  disabled={locationLoading}
                 >
-                  <Text style={styles.signupLink}>Create Account</Text>
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons
+                        name="map-marker-check"
+                        size={wp("5%")}
+                        color={Colors.primary}
+                      />
+                      <Text style={styles.mapPickerText}>
+                        Pick location on Google Maps
+                      </Text>
+                      <Feather
+                        name="arrow-right"
+                        size={wp("4.5%")}
+                        color={Colors.primary}
+                      />
+                    </>
+                  )}
                 </TouchableOpacity>
-              </View>
-            </View>
+
+                {form.latitude && form.longitude && (
+                  <View style={styles.locationDetected}>
+                    <Feather
+                      name="check-circle"
+                      size={wp("3.5%")}
+                      color={Colors.success ?? "#22C55E"}
+                    />
+                    <Text style={styles.locationDetectedText}>
+                      📍 Location detected and address auto-filled
+                    </Text>
+                  </View>
+                )}
+
+                {/* ─ GST Divider ─ */}
+                <View style={styles.profileDivider}>
+                  <View style={styles.profileDividerLine} />
+                  <Text style={styles.profileDividerText}>
+                    GST Details{" "}
+                    <Text style={styles.optionalText}>(Optional)</Text>
+                  </Text>
+                  <View style={styles.profileDividerLine} />
+                </View>
+
+                {/* ─ Approval banner ─ */}
+                <View
+                  style={[
+                    styles.approvalBanner,
+                    { backgroundColor: isAutoApproval ? "#E6F9F0" : "#FFF8E1" },
+                  ]}
+                >
+                  <Feather
+                    name={isAutoApproval ? "zap" : "clock"}
+                    size={wp("4.5%")}
+                    color={
+                      isAutoApproval
+                        ? (Colors.success ?? "#22C55E")
+                        : (Colors.warning ?? "#F59E0B")
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.approvalTitle,
+                        {
+                          color: isAutoApproval
+                            ? (Colors.success ?? "#22C55E")
+                            : (Colors.warning ?? "#F59E0B"),
+                        },
+                      ]}
+                    >
+                      {isAutoApproval ? "Auto Approval" : "Manual Approval"}
+                    </Text>
+                    <Text style={styles.approvalDesc}>
+                      {isAutoApproval
+                        ? "Valid GST — account will be approved instantly."
+                        : "Without GST, admin will review within 24hrs."}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* ─ GST Input ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: hp("0.8%"),
+                    }}
+                  >
+                    <Text style={styles.inputLabel}>GST Number</Text>
+                    {form.gstNumber.length > 0 && (
+                      <View
+                        style={[
+                          styles.gstChip,
+                          {
+                            backgroundColor: isGstValid(form.gstNumber)
+                              ? "#E6F9F020"
+                              : "#FFF5F5",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name={
+                            isGstValid(form.gstNumber)
+                              ? "check-circle"
+                              : "alert-circle"
+                          }
+                          size={wp("3%")}
+                          color={
+                            isGstValid(form.gstNumber)
+                              ? (Colors.success ?? "#22C55E")
+                              : Colors.error
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.gstChipText,
+                            {
+                              color: isGstValid(form.gstNumber)
+                                ? (Colors.success ?? "#22C55E")
+                                : Colors.error,
+                            },
+                          ]}
+                        >
+                          {isGstValid(form.gstNumber) ? "Valid" : "Invalid"}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: inputBorderColor("gstNumber"),
+                        backgroundColor: inputBg("gstNumber"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="credit-card"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "gstNumber"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={gstRef}
+                      style={[
+                        styles.profileInput,
+                        { letterSpacing: 1.2, fontWeight: "600" },
+                      ]}
+                      placeholder="e.g. 24AABCU9603R1ZX"
+                      placeholderTextColor={Colors.textMuted}
+                      autoCapitalize="characters"
+                      maxLength={15}
+                      value={form.gstNumber}
+                      onChangeText={(t) =>
+                        updateForm("gstNumber")(t.toUpperCase())
+                      }
+                      onFocus={() => setActiveField("gstNumber")}
+                      onBlur={() => setActiveField(null)}
+                      returnKeyType="done"
+                    />
+                  </View>
+                  {!!fieldErrors.gstNumber && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.gstNumber}
+                    </Text>
+                  )}
+                </View>
+
+                {!!error && (
+                  <View
+                    style={[styles.errorContainer, { marginBottom: hp("1%") }]}
+                  >
+                    <Ionicons
+                      name="warning-outline"
+                      size={wp("4%")}
+                      color={Colors.error}
+                      style={{ marginRight: wp("1.5%") }}
+                    />
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                )}
+
+                {/* ─ Submit ─ */}
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    { marginTop: hp("1%") },
+                    loading && { opacity: 0.8 },
+                  ]}
+                  onPress={handleSubmitProfile}
+                  activeOpacity={0.85}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={Colors.white} size="small" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryBtnText}>
+                        Complete Registration
+                      </Text>
+                      <Ionicons
+                        name="arrow-forward"
+                        size={wp("5%")}
+                        color={Colors.white}
+                        style={{ marginLeft: wp("2%") }}
+                      />
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
           </Animated.View>
 
-          {/* ── Footer ── */}
-          <Text style={styles.footer}>Customer App © 2026</Text>
+          <Text style={styles.footer}>JholeSaler App © 2026</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* ── State Dropdown Modal ── */}
+      <Modal
+        visible={showStateDropdown}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowStateDropdown(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.dropdownCard}>
+            <View style={styles.dropdownHeader}>
+              <Text style={styles.dropdownTitle}>Select State</Text>
+              <TouchableOpacity onPress={() => setShowStateDropdown(false)}>
+                <Text style={styles.dropdownClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.dropdownSearch}>
+              <TextInput
+                style={styles.dropdownSearchInput}
+                placeholder="Search state..."
+                placeholderTextColor={Colors.textMuted}
+                value={stateSearch}
+                onChangeText={setStateSearch}
+                autoFocus
+              />
+            </View>
+            <ScrollView
+              style={styles.dropdownList}
+              showsVerticalScrollIndicator={false}
+            >
+              {filteredStates.map((state) => (
+                <TouchableOpacity
+                  key={state}
+                  style={[
+                    styles.dropdownItem,
+                    form.state === state && styles.dropdownItemSelected,
+                  ]}
+                  onPress={() => {
+                    updateForm("state")(state);
+                    setShowStateDropdown(false);
+                    setStateSearch("");
+                    setTimeout(() => pincodeRef.current?.focus(), 300);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemText,
+                      form.state === state && styles.dropdownItemTextSelected,
+                    ]}
+                  >
+                    {state}
+                  </Text>
+                  {form.state === state && (
+                    <Feather
+                      name="check-circle"
+                      size={wp("4%")}
+                      color={Colors.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Success Modal ── */}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={styles.successModalOverlay}>
+          <Animated.View
+            style={[
+              styles.successCard,
+              { opacity: successOpacity, transform: [{ scale: successScale }] },
+            ]}
+          >
+            <View
+              style={[
+                styles.modalIconCircle,
+                {
+                  backgroundColor:
+                    approvalStatus === "auto" ? "#E6F9F0" : "#FFF8E1",
+                },
+              ]}
+            >
+              <Feather
+                name={approvalStatus === "auto" ? "zap" : "clock"}
+                size={wp("10%")}
+                color={
+                  approvalStatus === "auto"
+                    ? (Colors.success ?? "#22C55E")
+                    : (Colors.warning ?? "#F59E0B")
+                }
+              />
+            </View>
+            <Text style={styles.modalTitle}>
+              {approvalStatus === "auto"
+                ? "Account Approved!"
+                : "Registration Submitted!"}
+            </Text>
+            <Text style={styles.modalBody}>
+              {approvalStatus === "auto"
+                ? "Your GST number verified instantly. Your account is now active and ready to place orders."
+                : "Your profile is under review. Our admin team will verify and approve within 24 hours. We'll notify you on WhatsApp."}
+            </Text>
+            <View
+              style={[
+                styles.statusPill,
+                {
+                  backgroundColor:
+                    approvalStatus === "auto" ? "#E6F9F0" : "#FFF8E1",
+                },
+              ]}
+            >
+              <Feather
+                name={approvalStatus === "auto" ? "check-circle" : "clock"}
+                size={wp("3.5%")}
+                color={
+                  approvalStatus === "auto"
+                    ? (Colors.success ?? "#22C55E")
+                    : (Colors.warning ?? "#F59E0B")
+                }
+              />
+              <Text
+                style={[
+                  styles.statusPillText,
+                  {
+                    color:
+                      approvalStatus === "auto"
+                        ? (Colors.success ?? "#22C55E")
+                        : (Colors.warning ?? "#F59E0B"),
+                  },
+                ]}
+              >
+                {approvalStatus === "auto"
+                  ? "Auto Approved"
+                  : "Pending Admin Review"}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.modalBtn}
+              activeOpacity={0.87}
+              onPress={() => {
+                setShowSuccessModal(false);
+                router.replace("/(tabs)/home");
+              }}
+            >
+              <Text style={styles.modalBtnText}>
+                {approvalStatus === "auto" ? "Start Shopping" : "Got it!"}
+              </Text>
+              <Feather
+                name="arrow-right"
+                size={wp("4.5%")}
+                color={Colors.white}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  keyboardView: {
-    flex: 1,
-  },
+  root: { flex: 1, backgroundColor: Colors.background },
+  keyboardView: { flex: 1 },
   gradientBg: {
     position: "absolute",
     top: 0,
@@ -616,60 +1559,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerSpacer: {
-    width: wp("10%"),
-  },
-  scroll: {
-    flexGrow: 1,
-    paddingBottom: hp("4%"),
-  },
+  headerSpacer: { width: wp("10%") },
+  scroll: { flexGrow: 1, paddingBottom: hp("4%") },
   logoSection: {
     alignItems: "center",
     marginTop: hp("3%"),
     marginBottom: hp("3%"),
   },
-  logoContainer: {
-    position: "relative",
-    marginBottom: hp("2%"),
-  },
-  logoCircle: {
-    width: wp("24%"),
-    height: wp("24%"),
-    borderRadius: wp("40%"),
-    backgroundColor: Colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: Colors.shadowMedium,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 12,
-  },
-  logoBadge: {
-    position: "absolute",
-    bottom: -5,
-    right: -5,
-    width: wp("8%"),
-    height: wp("8%"),
-    borderRadius: wp("4%"),
-    backgroundColor: Colors.primaryMuted,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: Colors.white,
-  },
-  logoImage: {
-    width: wp("32%"),
-    height: wp("32%"),
-  },
+  logoContainer: { position: "relative", marginBottom: hp("2%") },
+  logoImage: { width: wp("32%"), height: wp("32%") },
   appName: {
     fontSize: wp("7%"),
     fontWeight: "800",
     color: Colors.white,
     letterSpacing: 0.5,
-    textShadowColor: "rgba(0,0,0,0.1)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
   tagline: {
     fontSize: wp("3.6%"),
@@ -677,6 +1580,7 @@ const styles = StyleSheet.create({
     marginTop: hp("0.5%"),
     fontWeight: "500",
   },
+
   card: {
     backgroundColor: Colors.surface,
     borderRadius: wp("6%"),
@@ -690,9 +1594,7 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 12,
   },
-  cardHeader: {
-    marginBottom: hp("2.5%"),
-  },
+  cardHeader: { marginBottom: hp("2.5%") },
   cardTitle: {
     fontSize: wp("6%"),
     fontWeight: "800",
@@ -704,13 +1606,9 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: wp("5.5%"),
   },
-  phoneHighlight: {
-    fontWeight: "700",
-    color: Colors.primary,
-  },
-  inputSection: {
-    marginBottom: hp("2%"),
-  },
+  phoneHighlight: { fontWeight: "700", color: Colors.primary },
+
+  inputSection: { marginBottom: hp("2%") },
   inputLabel: {
     fontSize: wp("3.5%"),
     fontWeight: "600",
@@ -718,11 +1616,7 @@ const styles = StyleSheet.create({
     marginBottom: hp("1%"),
     marginLeft: wp("1%"),
   },
-  phoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
+  phoneRow: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   countryBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -734,9 +1628,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     gap: wp("1.5%"),
   },
-  countryFlag: {
-    fontSize: wp("5.5%"),
-  },
+  countryFlag: { fontSize: wp("5.5%") },
   countryDial: {
     fontSize: wp("3.8%"),
     fontWeight: "600",
@@ -754,13 +1646,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  inputError: {
-    borderColor: Colors.error,
-    backgroundColor: "#FFF5F5",
-  },
-  otpSection: {
-    marginBottom: hp("2%"),
-  },
+  inputError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
+
+  otpSection: { marginBottom: hp("2%") },
   otpRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -777,10 +1665,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
     textAlign: "center",
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
     elevation: 2,
   },
   otpBoxFilled: {
@@ -788,37 +1672,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.otpBoxFilled,
     color: Colors.primary,
   },
-  otpBoxError: {
-    borderColor: Colors.error,
-    backgroundColor: "#FFF5F5",
-  },
-  progressRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: wp("2.5%"),
-    marginTop: hp("2%"),
-  },
-  progressDot: {
-    width: wp("1.8%"),
-    height: wp("1.8%"),
-    borderRadius: wp("0.9%"),
-    backgroundColor: Colors.border,
-  },
-  progressDotFilled: {
-    backgroundColor: Colors.primary,
-    width: wp("4%"),
-  },
+  otpBoxError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
+
   errorContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: hp("1%"),
     marginLeft: wp("1%"),
   },
-  errorText: {
-    fontSize: wp("3.3%"),
-    color: Colors.error,
-    fontWeight: "500",
-  },
+  errorText: { fontSize: wp("3.3%"), color: Colors.error, fontWeight: "500" },
+
   primaryBtn: {
     backgroundColor: Colors.primary,
     borderRadius: wp("3.5%"),
@@ -845,6 +1708,7 @@ const styles = StyleSheet.create({
     color: Colors.textOnPrimary,
     letterSpacing: 0.5,
   },
+
   legalNote: {
     fontSize: wp("3%"),
     color: Colors.textMuted,
@@ -852,29 +1716,22 @@ const styles = StyleSheet.create({
     lineHeight: wp("4.5%"),
     marginTop: hp("2%"),
   },
-  legalLink: {
-    color: Colors.primary,
-    fontWeight: "600",
-  },
+  legalLink: { color: Colors.primary, fontWeight: "600" },
+
   resendRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     marginTop: hp("2%"),
   },
-  resendLabel: {
-    fontSize: wp("3.5%"),
-    color: Colors.textSecondary,
-  },
+  resendLabel: { fontSize: wp("3.5%"), color: Colors.textSecondary },
   resendLink: {
     fontSize: wp("3.5%"),
     fontWeight: "700",
     color: Colors.primary,
   },
-  resendLinkDisabled: {
-    color: Colors.textMuted,
-    fontWeight: "400",
-  },
+  resendLinkDisabled: { color: Colors.textMuted, fontWeight: "400" },
+
   waHint: {
     flexDirection: "row",
     alignItems: "center",
@@ -886,38 +1743,261 @@ const styles = StyleSheet.create({
     marginTop: hp("2%"),
     gap: wp("2%"),
   },
-  waHintText: {
-    fontSize: wp("3.2%"),
-    color: Colors.accent,
-    fontWeight: "600",
+  waHintText: { fontSize: wp("3.2%"), color: Colors.accent, fontWeight: "600" },
+
+  // ── Profile form styles ──
+  profileFieldWrap: { marginBottom: hp("1.8%") },
+  profileInputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: wp("3.5%"),
+    borderWidth: 1.5,
+    paddingHorizontal: wp("3.5%"),
+    paddingVertical: hp("0.2%"),
   },
-  signupContainer: {
-    marginTop: hp("2.5%"),
+  profileInputIcon: { marginRight: wp("2.5%") },
+  profileInput: {
+    flex: 1,
+    paddingVertical: hp("1.6%"),
+    fontSize: wp("3.8%"),
+    color: Colors.textPrimary,
+    fontWeight: "500",
   },
-  divider: {
-    height: 1,
-    backgroundColor: Colors.divider,
+  fieldErrorText: {
+    fontSize: wp("3%"),
+    color: Colors.error,
+    fontWeight: "500",
+    marginTop: hp("0.4%"),
+    marginLeft: wp("1%"),
+  },
+  optionalText: {
+    fontSize: wp("3%"),
+    color: Colors.textMuted,
+    fontWeight: "400",
+  },
+  twoColRow: { flexDirection: "row", gap: wp("3%") },
+
+  profileDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2.5%"),
+    marginTop: hp("0.5%"),
     marginBottom: hp("2%"),
   },
-  signupRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  signupLabel: {
-    fontSize: wp("3.5%"),
+  profileDividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
+  profileDividerText: {
+    fontSize: wp("3.2%"),
+    fontWeight: "600",
     color: Colors.textSecondary,
   },
-  signupLink: {
-    fontSize: wp("3.5%"),
-    fontWeight: "700",
+
+  // ── Auto Location Detection Styles ──
+  mapPickerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.primaryLight ?? "#EEF3FF",
+    borderRadius: wp("3.5%"),
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("1.4%"),
+    marginBottom: hp("1.5%"),
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "40",
+    gap: wp("2.5%"),
+  },
+  mapPickerText: {
+    flex: 1,
+    fontSize: wp("3.4%"),
+    fontWeight: "600",
     color: Colors.primary,
   },
+  locationDetected: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: hp("-0.5%"),
+    marginBottom: hp("1.5%"),
+    gap: wp("2%"),
+  },
+  locationDetectedText: {
+    fontSize: wp("3%"),
+    color: Colors.success ?? "#22C55E",
+    fontWeight: "500",
+  },
+
+  approvalBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    borderRadius: wp("3.5%"),
+    padding: wp("3.5%"),
+    marginBottom: hp("1.8%"),
+    gap: wp("2.5%"),
+  },
+  approvalTitle: {
+    fontSize: wp("3.4%"),
+    fontWeight: "700",
+    marginBottom: hp("0.2%"),
+  },
+  approvalDesc: {
+    fontSize: wp("3%"),
+    color: Colors.textSecondary,
+    lineHeight: wp("4.5%"),
+  },
+
+  gstChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: wp("3%"),
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.4%"),
+    gap: wp("1%"),
+  },
+  gstChipText: { fontSize: wp("2.8%"), fontWeight: "700" },
+
   footer: {
     textAlign: "center",
     marginTop: hp("3%"),
     fontSize: wp("3%"),
     color: Colors.textMuted,
+  },
+  autoLoginText: {
+    fontSize: wp("4%"),
+    color: Colors.white,
+    marginTop: hp("2%"),
+    fontWeight: "500",
+  },
+
+  // ── Modals ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: "flex-end",
+  },
+  dropdownCard: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: wp("6%"),
+    borderTopRightRadius: wp("6%"),
+    maxHeight: hp("60%"),
+  },
+  dropdownHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: wp("5%"),
+    paddingTop: hp("2.5%"),
+    paddingBottom: hp("1.5%"),
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  dropdownTitle: {
+    fontSize: wp("4.5%"),
+    fontWeight: "700",
+    color: Colors.textPrimary,
+  },
+  dropdownClose: {
+    fontSize: wp("5%"),
+    color: Colors.textMuted,
+    padding: wp("2%"),
+  },
+  dropdownSearch: {
+    paddingHorizontal: wp("5%"),
+    paddingVertical: hp("1.5%"),
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  dropdownSearchInput: {
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: wp("3%"),
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("1.4%"),
+    fontSize: wp("3.8%"),
+    color: Colors.textPrimary,
+  },
+  dropdownList: { paddingHorizontal: wp("5%"), paddingVertical: hp("1%") },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: hp("1.8%"),
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  dropdownItemSelected: {
+    backgroundColor: Colors.primaryLight ?? "#EEF3FF",
+    marginHorizontal: -wp("2%"),
+    paddingHorizontal: wp("2%"),
+    borderRadius: wp("2%"),
+  },
+  dropdownItemText: { fontSize: wp("3.8%"), color: Colors.textPrimary },
+  dropdownItemTextSelected: { color: Colors.primary, fontWeight: "600" },
+
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: wp("5%"),
+  },
+  successCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: wp("5%"),
+    padding: wp("7%"),
+    alignItems: "center",
+    width: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  modalIconCircle: {
+    width: wp("20%"),
+    height: wp("20%"),
+    borderRadius: wp("10%"),
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: hp("2.5%"),
+  },
+  modalTitle: {
+    fontSize: wp("5.5%"),
+    fontWeight: "800",
+    color: Colors.textPrimary,
+    marginBottom: hp("1.5%"),
+    textAlign: "center",
+  },
+  modalBody: {
+    fontSize: wp("3.5%"),
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: wp("5.5%"),
+    marginBottom: hp("2.5%"),
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: wp("5%"),
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("0.8%"),
+    gap: wp("2%"),
+    marginBottom: hp("3%"),
+  },
+  statusPillText: { fontSize: wp("3.3%"), fontWeight: "700" },
+  modalBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: wp("3.5%"),
+    paddingVertical: hp("1.8%"),
+    paddingHorizontal: wp("10%"),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2%"),
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  modalBtnText: {
+    fontSize: wp("4.2%"),
+    fontWeight: "800",
+    color: Colors.white,
   },
 });
 

@@ -18,6 +18,7 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../../constants/colors";
+import { clearToken } from "../services/api"; // ✅ Import clearToken
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -115,7 +116,12 @@ const ProfileScreen = () => {
       {
         text: "Logout",
         style: "destructive",
-        onPress: () => router.replace("/auth/login"),
+        onPress: async () => {
+          // ✅ Clear token BEFORE redirecting
+          await clearToken();
+          // ✅ Use replace so user can't swipe back to protected screens
+          router.replace("/auth/login");
+        },
       },
     ]);
   };
@@ -170,7 +176,7 @@ const ProfileScreen = () => {
 
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>Sonali Ray</Text>
-              <Text style={styles.profileSub}>Customer App Member</Text>
+              <Text style={styles.profileSub}>Jhole Salers App</Text>
             </View>
           </View>
 
@@ -213,7 +219,7 @@ const ProfileScreen = () => {
         </TouchableOpacity>
 
         {/* ── App version ── */}
-        <Text style={styles.versionText}>Customer App v1.0.0</Text>
+        <Text style={styles.versionText}>JholeSaler App v1.0.0</Text>
 
         <View style={{ height: hp("10%") }} />
       </ScrollView>

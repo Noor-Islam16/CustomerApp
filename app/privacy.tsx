@@ -39,7 +39,7 @@ const PRIVACY_SECTIONS: PolicySection[] = [
     title: "Introduction",
     icon: "info",
     content: [
-      'Welcome to Customer App ("we", "our", "us"). We are committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application.',
+      'Welcome to JholeSaler ("we", "our", "us"). We are committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application.',
       "Please read this privacy policy carefully. If you do not agree with the terms of this privacy policy, please do not access the application.",
     ],
   },
@@ -169,9 +169,9 @@ const PRIVACY_SECTIONS: PolicySection[] = [
     icon: "mail",
     content: [
       "If you have any questions about this Privacy Policy, please contact us:",
-      "• Email: support@customerapp.com",
+      "• Email: support@jholesaler.com",
       "• Phone: +91 1800 123 4567",
-      "• Address: Customer App, 123 Business Plaza, Mumbai - 400001, India",
+      "• Address: JholeSaler, 123 Business Plaza, Mumbai - 400001, India",
       "• Support Hours: Monday to Saturday, 9:00 AM to 8:00 PM IST",
       "",
       "We will respond to your inquiry within 48 hours.",
@@ -352,8 +352,8 @@ const PrivacyPolicyScreen = () => {
     try {
       await Share.share({
         message:
-          "Check out Customer App's Privacy Policy. We value your privacy and data security.\n\nDownload the app to learn more.",
-        title: "Privacy Policy - Customer App",
+          "Check out JholeSaler App's Privacy Policy. We value your privacy and data security.\n\nDownload the app to learn more.",
+        title: "Privacy Policy - JholeSaler App",
       });
     } catch (error) {
       Alert.alert("Error", "Unable to share at this moment");

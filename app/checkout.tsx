@@ -1,11 +1,13 @@
-
+// app/checkout.tsx
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -14,8 +16,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  ActivityIndicator,
-  Image,
 } from "react-native";
 import {
   heightPercentageToDP as hp,
@@ -24,7 +24,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "../constants/colors";
 import { useCart } from "../context/CartContext";
-import { apiGetMe, apiPlaceOrder, Order } from "./services/api"; 
+import { apiGetMe, apiPlaceOrder, Order } from "./services/api";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartOrderData {
@@ -48,6 +49,21 @@ interface UserProfile {
   state?: string;
   pincode?: string;
 }
+
+// ─── Helper: Get price from product (handles both API and legacy formats) ─────
+const getProductPrice = (product: any): number => {
+  // Check for sellingPrice first (new electronics format)
+  if (product.sellingPrice !== undefined && product.sellingPrice !== null) {
+    return product.sellingPrice;
+  }
+  // Fallback to other possible price fields
+  return product.price || product.originalPrice || 0;
+};
+
+const getItemTotal = (item: any): number => {
+  const price = getProductPrice(item.product);
+  return price * item.quantity;
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -75,7 +91,31 @@ const CheckoutScreen: React.FC = () => {
     if (params.orderData) {
       try {
         const parsed = JSON.parse(params.orderData as string);
+
+        // ✅ Fix: Recalculate item totals with sellingPrice
+        if (parsed.items) {
+          parsed.items = parsed.items.map((item: any) => ({
+            ...item,
+            // Ensure product has sellingPrice (handles both old and new format)
+            product: {
+              ...item.product,
+              sellingPrice: getProductPrice(item.product),
+            },
+          }));
+        }
+
         setOrderData(parsed);
+
+        // Debug: Log the prices
+        console.log(
+          "📋 Checkout items:",
+          parsed.items.map((i: any) => ({
+            name: i.product.name,
+            sellingPrice: i.product.sellingPrice,
+            quantity: i.quantity,
+            total: getItemTotal(i),
+          })),
+        );
       } catch {
         Alert.alert("Error", "Failed to load order details.");
         router.back();
@@ -91,7 +131,6 @@ const CheckoutScreen: React.FC = () => {
         setUserProfile(res.user.profile);
         setUserPhone(res.user.phone);
       } catch {
-        // Profile fetch failed — user can still see checkout but address may be incomplete
         setUserProfile(null);
       } finally {
         setLoadingProfile(false);
@@ -156,7 +195,6 @@ const CheckoutScreen: React.FC = () => {
         "Please complete your delivery address in your profile before placing an order.",
         [{ text: "Go to Profile", onPress: () => router.push("/(tabs)/home") }],
       );
-
       return;
     }
 
@@ -187,7 +225,7 @@ const CheckoutScreen: React.FC = () => {
         gst: orderData.gst,
         deliveryTip: orderData.deliveryTip,
         paymentMethod: "upi" as const,
-        transactionId: `TXN-${Date.now()}`, // mock — replace with real UPI txn ID
+        transactionId: `TXN-${Date.now()}`,
       };
 
       const result = await apiPlaceOrder(payload);
@@ -253,7 +291,10 @@ const CheckoutScreen: React.FC = () => {
   if (!orderData || loadingProfile) {
     return (
       <View style={styles.loadingContainer}>
-        <StatusBar barStyle="dark-content" backgroundColor={Colors.gradientStart} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.gradientStart}
+        />
         <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Loading checkout...</Text>
       </View>
@@ -263,13 +304,14 @@ const CheckoutScreen: React.FC = () => {
   // ─── Render ───────────────────────────────────────────────────────────────
 
   const hasAddress =
-    userProfile?.contactName &&
-    userProfile?.addressLine1 &&
-    userProfile?.city;
+    userProfile?.contactName && userProfile?.addressLine1 && userProfile?.city;
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.gradientStart} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={Colors.gradientStart}
+      />
 
       {/* Header */}
       <LinearGradient
@@ -285,8 +327,15 @@ const CheckoutScreen: React.FC = () => {
         ]}
       >
         <View style={styles.headerContent}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={wp("5.5%")} color={Colors.white} />
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={wp("5.5%")}
+              color={Colors.white}
+            />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Checkout</Text>
           <View style={{ width: wp("10%") }} />
@@ -313,13 +362,15 @@ const CheckoutScreen: React.FC = () => {
 
             {hasAddress ? (
               <>
-                <Text style={styles.addressName}>{userProfile.contactName}</Text>
+                <Text style={styles.addressName}>
+                  {userProfile?.contactName}
+                </Text>
                 <Text style={styles.addressText}>
-                  {userProfile.addressLine1}
-                  {userProfile.addressLine2
+                  {userProfile?.addressLine1}
+                  {userProfile?.addressLine2
                     ? `,\n${userProfile.addressLine2}`
                     : ""}
-                  {`\n${userProfile.city}, ${userProfile.state} - ${userProfile.pincode}`}
+                  {`\n${userProfile?.city}, ${userProfile?.state} - ${userProfile?.pincode}`}
                 </Text>
                 {userPhone ? (
                   <Text style={styles.addressPhone}>📞 {userPhone}</Text>
@@ -327,7 +378,11 @@ const CheckoutScreen: React.FC = () => {
               </>
             ) : (
               <View style={styles.missingAddressBox}>
-                <Feather name="alert-circle" size={wp("4%")} color={Colors.error} />
+                <Feather
+                  name="alert-circle"
+                  size={wp("4%")}
+                  color={Colors.error}
+                />
                 <Text style={styles.missingAddressText}>
                   Delivery address is incomplete. Please update your profile.
                 </Text>
@@ -358,7 +413,7 @@ const CheckoutScreen: React.FC = () => {
                   <Text style={styles.summaryItemQty}>×{item.quantity}</Text>
                 </View>
                 <Text style={styles.summaryItemPrice}>
-                  ₹{item.product.price * item.quantity}
+                  ₹{getItemTotal(item)}
                 </Text>
               </View>
             ))}
@@ -367,7 +422,9 @@ const CheckoutScreen: React.FC = () => {
 
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryValue}>₹{orderData.subtotal}</Text>
+              <Text style={styles.summaryValue}>
+                ₹{orderData.subtotal || 0}
+              </Text>
             </View>
 
             {orderData.couponDiscount > 0 && (
@@ -384,7 +441,9 @@ const CheckoutScreen: React.FC = () => {
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Delivery</Text>
               <Text style={styles.summaryValue}>
-                {orderData.deliveryCharge === 0 ? "FREE" : `₹${orderData.deliveryCharge}`}
+                {orderData.deliveryCharge === 0
+                  ? "FREE"
+                  : `₹${orderData.deliveryCharge}`}
               </Text>
             </View>
 
@@ -401,7 +460,9 @@ const CheckoutScreen: React.FC = () => {
             {orderData.deliveryTip > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Delivery Tip</Text>
-                <Text style={styles.summaryValue}>₹{orderData.deliveryTip}</Text>
+                <Text style={styles.summaryValue}>
+                  ₹{orderData.deliveryTip}
+                </Text>
               </View>
             )}
 
@@ -409,7 +470,9 @@ const CheckoutScreen: React.FC = () => {
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total Amount</Text>
-              <Text style={styles.totalValue}>₹{orderData.totalAmount}</Text>
+              <Text style={styles.totalValue}>
+                ₹{orderData.totalAmount || 0}
+              </Text>
             </View>
           </View>
         </View>
@@ -425,7 +488,11 @@ const CheckoutScreen: React.FC = () => {
                 color={Colors.primary}
               />
               <Text style={styles.paymentOptionText}>UPI / QR Code</Text>
-              <Feather name="check-circle" size={wp("5%")} color={Colors.primary} />
+              <Feather
+                name="check-circle"
+                size={wp("5%")}
+                color={Colors.primary}
+              />
             </View>
           </View>
         </View>
@@ -439,7 +506,9 @@ const CheckoutScreen: React.FC = () => {
         >
           <View style={styles.bottomBarLeft}>
             <Text style={styles.bottomBarLabel}>Total Amount</Text>
-            <Text style={styles.bottomBarAmount}>₹{orderData.totalAmount}</Text>
+            <Text style={styles.bottomBarAmount}>
+              ₹{orderData.totalAmount || 0}
+            </Text>
           </View>
           <TouchableOpacity
             style={[styles.placeOrderBtn, isPlacingOrder && { opacity: 0.7 }]}
@@ -496,7 +565,9 @@ const CheckoutScreen: React.FC = () => {
                   size={wp("30%")}
                   color={Colors.primary}
                 />
-                <Text style={styles.qrAmount}>₹{orderData.totalAmount}</Text>
+                <Text style={styles.qrAmount}>
+                  ₹{orderData.totalAmount || 0}
+                </Text>
               </View>
             </View>
 
@@ -523,16 +594,15 @@ const CheckoutScreen: React.FC = () => {
                 "https://upload.wikimedia.org/wikipedia/commons/2/24/Paytm_Logo_%28standalone%29.svg",
                 "https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg",
               ].map((uri) => (
-                <Image
-                  key={uri}
-                  source={{ uri }}
-                  style={styles.upiIcon}
-                />
+                <Image key={uri} source={{ uri }} style={styles.upiIcon} />
               ))}
             </View>
 
             <TouchableOpacity
-              style={[styles.confirmPaymentBtn, isPlacingOrder && { opacity: 0.7 }]}
+              style={[
+                styles.confirmPaymentBtn,
+                isPlacingOrder && { opacity: 0.7 },
+              ]}
               onPress={handleConfirmPayment}
               disabled={isPlacingOrder}
             >
@@ -549,8 +619,7 @@ const CheckoutScreen: React.FC = () => {
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
+// ─── Styles (unchanged) ───────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: {
@@ -561,7 +630,6 @@ const styles = StyleSheet.create({
     gap: hp("2%"),
   },
   loadingText: { fontSize: wp("3.8%"), color: Colors.textSecondary },
-
   header: { paddingBottom: hp("2%"), paddingHorizontal: wp("5%") },
   headerContent: {
     flexDirection: "row",
@@ -577,7 +645,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerTitle: { fontSize: wp("4.5%"), fontWeight: "700", color: Colors.white },
-
   content: { flex: 1, paddingHorizontal: wp("4%"), paddingTop: hp("2%") },
   section: { marginBottom: hp("2%") },
   sectionTitle: {
@@ -586,8 +653,6 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginBottom: hp("1.5%"),
   },
-
-  // Address
   addressCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -605,7 +670,11 @@ const styles = StyleSheet.create({
     gap: wp("2%"),
     marginBottom: hp("1%"),
   },
-  addressType: { fontSize: wp("3.5%"), fontWeight: "600", color: Colors.primary },
+  addressType: {
+    fontSize: wp("3.5%"),
+    fontWeight: "600",
+    color: Colors.primary,
+  },
   addressName: {
     fontSize: wp("3.8%"),
     fontWeight: "700",
@@ -646,8 +715,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.primary,
   },
-
-  // Summary
   summaryCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -677,7 +744,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.textPrimary,
   },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: hp("1%") },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: hp("1%"),
+  },
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -705,8 +776,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: Colors.textPrimary,
   },
-
-  // Payment
   paymentCard: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -728,8 +797,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: Colors.textPrimary,
   },
-
-  // Bottom bar
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -762,9 +829,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: hp("5.5%"),
   },
-  placeOrderText: { fontSize: wp("4%"), fontWeight: "700", color: Colors.white },
-
-  // Modal
+  placeOrderText: {
+    fontSize: wp("4%"),
+    fontWeight: "700",
+    color: Colors.white,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,
@@ -839,11 +908,7 @@ const styles = StyleSheet.create({
     gap: wp("8%"),
     marginBottom: hp("3%"),
   },
-  upiIcon: {
-    width: wp("12%"),
-    height: wp("12%"),
-    resizeMode: "contain",
-  },
+  upiIcon: { width: wp("12%"), height: wp("12%"), resizeMode: "contain" },
   confirmPaymentBtn: {
     backgroundColor: Colors.primary,
     borderRadius: wp("3%"),

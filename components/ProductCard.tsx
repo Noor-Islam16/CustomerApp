@@ -1,5 +1,5 @@
 // components/ProductCard.tsx
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useRef } from "react";
@@ -28,16 +28,87 @@ interface ProductCardProps {
   layout?: "grid" | "list";
 }
 
-const TAG_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
-  "Limited Stock": { bg: "#FFF3E0", text: "#C75B00", dot: "#FFA000" },
-  "Fast Moving": { bg: "#E8F5E9", text: "#2E7D32", dot: "#43A047" },
-  "Best Seller": { bg: "#FFF0F0", text: "#C62828", dot: "#EF5350" },
-  Premium: { bg: "#FFF8E1", text: "#E65100", dot: "#FFA000" },
-  Organic: { bg: "#E8F5E9", text: "#2E7D32", dot: "#66BB6A" },
-  Imported: { bg: "#E3F2FD", text: "#1565C0", dot: "#42A5F5" },
-  "New Arrival": { bg: "#E8EAF6", text: "#283593", dot: "#5C6BC0" },
-  "Special Offer": { bg: "#FCE4EC", text: "#AD1457", dot: "#EC407A" },
-  Trending: { bg: "#E0F7FA", text: "#006064", dot: "#00ACC1" },
+// Updated TAG_CONFIG for electronics accessories
+const TAG_CONFIG: Record<
+  string,
+  { bg: string; text: string; dot: string; icon?: string }
+> = {
+  "New Arrival": {
+    bg: "#E8F5E9",
+    text: "#2E7D32",
+    dot: "#43A047",
+    icon: "zap",
+  },
+  "Best Seller": {
+    bg: "#FFF0F0",
+    text: "#C62828",
+    dot: "#EF5350",
+    icon: "award",
+  },
+  "Fast Charging": {
+    bg: "#FFF3E0",
+    text: "#C75B00",
+    dot: "#FFA000",
+    icon: "zap",
+  },
+  Wireless: { bg: "#E8EAF6", text: "#283593", dot: "#5C6BC0", icon: "wifi" },
+  Gaming: { bg: "#E0F7FA", text: "#006064", dot: "#00ACC1", icon: "cpu" },
+  Premium: { bg: "#FFF8E1", text: "#E65100", dot: "#FFA000", icon: "star" },
+  "Budget Friendly": {
+    bg: "#E8F5E9",
+    text: "#2E7D32",
+    dot: "#66BB6A",
+    icon: "dollar-sign",
+  },
+  Waterproof: {
+    bg: "#E3F2FD",
+    text: "#1565C0",
+    dot: "#42A5F5",
+    icon: "shield",
+  },
+  MagSafe: { bg: "#FCE4EC", text: "#AD1457", dot: "#EC407A", icon: "disc" },
+  "Limited Edition": {
+    bg: "#FFF0F0",
+    text: "#C62828",
+    dot: "#EF5350",
+    icon: "award",
+  },
+  "Eco-Friendly": {
+    bg: "#E8F5E9",
+    text: "#2E7D32",
+    dot: "#66BB6A",
+    icon: "leaf",
+  },
+  "Travel Ready": {
+    bg: "#E3F2FD",
+    text: "#1565C0",
+    dot: "#42A5F5",
+    icon: "briefcase",
+  },
+  "Limited Stock": {
+    bg: "#FFF3E0",
+    text: "#C75B00",
+    dot: "#FFA000",
+    icon: "alert-circle",
+  },
+  "Fast Moving": {
+    bg: "#E8F5E9",
+    text: "#2E7D32",
+    dot: "#43A047",
+    icon: "trending-up",
+  },
+  Trending: {
+    bg: "#E0F7FA",
+    text: "#006064",
+    dot: "#00ACC1",
+    icon: "trending-up",
+  },
+  "Special Offer": {
+    bg: "#FCE4EC",
+    text: "#AD1457",
+    dot: "#EC407A",
+    icon: "percent",
+  },
 };
 
 const ProductCard: React.FC<ProductCardProps> = ({
@@ -52,10 +123,26 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   const quantity = getCartQuantity(product.id);
   const isOutOfStock = !product.inStock;
-  const discount = product.discount || 0;
-  const hasDiscount = discount > 0;
+
+  // Calculate discount dynamically from API data
+  const hasDiscount =
+    product.originalPrice > 0 && product.sellingPrice < product.originalPrice;
+  const discountPercentage = hasDiscount
+    ? Math.round(
+        ((product.originalPrice - product.sellingPrice) /
+          product.originalPrice) *
+          100,
+      )
+    : 0;
+
   const primaryTag = product.tags?.[0];
   const tagConfig = primaryTag ? TAG_CONFIG[primaryTag] : null;
+
+  // Get primary image from images array (supports multiple images)
+  const primaryImage =
+    product.images?.find((img) => img.isPrimary)?.url ||
+    product.images?.[0]?.url;
+  const totalImages = product.images?.length || 0;
 
   const handlePressIn = () =>
     Animated.spring(scale, {
@@ -116,50 +203,89 @@ const ProductCard: React.FC<ProductCardProps> = ({
           <View
             style={[styles.imageContainer, isList && styles.imageContainerList]}
           >
-            <Image
-              source={{ uri: product.images[0] }}
-              style={styles.image}
-              resizeMode="cover"
-            />
+            {primaryImage ? (
+              <Image
+                source={{ uri: primaryImage }}
+                style={styles.image}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[styles.image, styles.imagePlaceholder]}>
+                <MaterialIcons
+                  name="devices"
+                  size={wp("12%")}
+                  color={Colors.border}
+                />
+              </View>
+            )}
 
             <LinearGradient
               colors={["transparent", "rgba(0,0,0,0.7)", "rgba(0,0,0,0.85)"]}
               style={styles.imageOverlay}
             />
 
+            {/* Discount Badge - calculated from API prices */}
             {hasDiscount && (
               <View style={styles.discountBadge}>
-                <Text style={styles.discountText}>{discount}% OFF</Text>
+                <Text style={styles.discountText}>
+                  {discountPercentage}% OFF
+                </Text>
               </View>
             )}
 
-            {!hideTags && tagConfig && (
+            {/* Fast Moving Badge */}
+            {product.isFastMoving && (
+              <View style={styles.fastMovingBadge}>
+                <Feather name="zap" size={wp("2.8%")} color="#fff" />
+                <Text style={styles.fastMovingText}>Fast</Text>
+              </View>
+            )}
+
+            {/* Tag Badge */}
+            {!hideTags && tagConfig && !product.isFastMoving && (
               <View
                 style={[styles.imageTag, { backgroundColor: tagConfig.bg }]}
               >
-                <View
-                  style={[styles.tagDot, { backgroundColor: tagConfig.dot }]}
-                />
+                {tagConfig.icon && (
+                  <Feather
+                    name={tagConfig.icon as any}
+                    size={wp("2.5%")}
+                    color={tagConfig.dot}
+                  />
+                )}
                 <Text style={[styles.imageTagText, { color: tagConfig.text }]}>
                   {primaryTag}
                 </Text>
               </View>
             )}
 
-            {!isOutOfStock && product.stock <= 10 && product.stock > 0 && (
-              <View style={styles.stockPill}>
-                <Text style={styles.stockPillText}>
-                  Only {product.stock} left
-                </Text>
+            {/* Image Count Badge */}
+            {totalImages > 1 && (
+              <View style={styles.imageCountBadge}>
+                <Text style={styles.imageCountText}>{totalImages} pics</Text>
               </View>
             )}
 
+            {/* Low Stock Warning */}
+            {!isOutOfStock &&
+              product.stockQuantity <= 10 &&
+              product.stockQuantity > 0 && (
+                <View style={styles.stockPill}>
+                  <Text style={styles.stockPillText}>
+                    Only {product.stockQuantity} left
+                  </Text>
+                </View>
+              )}
+
+            {/* Out of Stock Overlay */}
             {isOutOfStock && (
               <View style={styles.oosOverlay}>
+                <MaterialIcons name="block" size={wp("8%")} color="#fff" />
                 <Text style={styles.oosText}>Out of Stock</Text>
               </View>
             )}
 
+            {/* Wishlist Button */}
             {onWishlist && (
               <TouchableOpacity
                 style={styles.wishBtn}
@@ -176,37 +302,118 @@ const ProductCard: React.FC<ProductCardProps> = ({
               </TouchableOpacity>
             )}
 
+            {/* Product Info Overlay on Image */}
             <View
               style={[
                 styles.imageTextOverlay,
                 isList && styles.imageTextOverlayList,
               ]}
             >
-              {product.brand && (
+              {product.brand ? (
                 <Text
                   style={[styles.imageBrand, isList && styles.imageBrandList]}
                   numberOfLines={1}
                 >
                   {product.brand}
                 </Text>
-              )}
+              ) : null}
               <Text
                 style={[styles.imageName, isList && styles.imageNameList]}
                 numberOfLines={2}
               >
                 {product.name}
               </Text>
-              <Text
-                style={[styles.imageUnit, isList && styles.imageUnitList]}
-                numberOfLines={1}
-              >
-                {product.weight || product.unit}
-              </Text>
+              <View style={styles.imageMetaRow}>
+                {product.type && (
+                  <Text style={styles.imageTypeText} numberOfLines={1}>
+                    {product.type}
+                  </Text>
+                )}
+                {product.dimensions && (
+                  <Text style={styles.imageTypeText} numberOfLines={1}>
+                    {product.dimensions}
+                  </Text>
+                )}
+              </View>
             </View>
           </View>
 
           {/* ── Content Section ── */}
           <View style={[styles.content, isList && styles.contentList]}>
+            {/* Specifications Preview */}
+            {product.specifications &&
+              Object.keys(product.specifications).length > 0 && (
+                <View style={styles.specRow}>
+                  {Object.entries(product.specifications)
+                    .slice(0, 2)
+                    .map(([key, val]) => (
+                      <Text key={key} style={styles.specText} numberOfLines={1}>
+                        {val}
+                      </Text>
+                    ))}
+                </View>
+              )}
+
+            {/* Color & Material */}
+            {(product.color || product.material) && (
+              <View style={styles.attributeRow}>
+                {product.color && (
+                  <View style={styles.attributeChip}>
+                    <View
+                      style={[
+                        styles.colorDot,
+                        {
+                          backgroundColor:
+                            product.color.toLowerCase() === "black"
+                              ? "#000"
+                              : product.color.toLowerCase() === "white"
+                                ? "#fff"
+                                : product.color.toLowerCase() === "silver"
+                                  ? "#C0C0C0"
+                                  : product.color.toLowerCase() === "gold"
+                                    ? "#FFD700"
+                                    : product.color.toLowerCase() ===
+                                        "rose gold"
+                                      ? "#B76E79"
+                                      : product.color.toLowerCase() === "blue"
+                                        ? "#2196F3"
+                                        : product.color.toLowerCase() === "red"
+                                          ? "#F44336"
+                                          : product.color.toLowerCase() ===
+                                              "green"
+                                            ? "#4CAF50"
+                                            : Colors.primary,
+                        },
+                      ]}
+                    />
+                    <Text style={styles.attributeText}>{product.color}</Text>
+                  </View>
+                )}
+                {product.material && (
+                  <View style={styles.attributeChip}>
+                    <Feather
+                      name="shield"
+                      size={wp("2.2%")}
+                      color={Colors.textMuted}
+                    />
+                    <Text style={styles.attributeText}>{product.material}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Warranty Badge */}
+            {product.warranty && product.warranty !== "No Warranty" && (
+              <View style={styles.warrantyBadge}>
+                <Feather
+                  name="shield"
+                  size={wp("2.2%")}
+                  color={Colors.primary}
+                />
+                <Text style={styles.warrantyText}>{product.warranty}</Text>
+              </View>
+            )}
+
             <View style={styles.priceRow}>
               <View style={isList && styles.priceInfoList}>
                 <View style={styles.priceMain}>
@@ -221,10 +428,11 @@ const ProductCard: React.FC<ProductCardProps> = ({
                   <Text
                     style={[styles.priceValue, isList && styles.priceValueList]}
                   >
-                    {product.price}
+                    {product.sellingPrice}
                   </Text>
                 </View>
-                {hasDiscount && product.originalPrice && (
+                {/* Show original price if there's a discount */}
+                {hasDiscount && (
                   <Text
                     style={[
                       styles.originalPrice,
@@ -236,6 +444,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 )}
               </View>
 
+              {/* Cart Actions */}
               {isOutOfStock ? (
                 <View
                   style={[styles.disabledBtn, isList && styles.disabledBtnList]}
@@ -294,23 +503,42 @@ const ProductCard: React.FC<ProductCardProps> = ({
               )}
             </View>
 
-            {product.rating ? (
-              <View style={styles.ratingRow}>
-                <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingVal}>{product.rating}</Text>
-                  <Feather name="star" size={wp("2.5%")} color="#fff" />
-                </View>
-                <Text style={styles.reviewCount}>
-                  {product.reviewCount?.toLocaleString("en-IN")} ratings
-                </Text>
-              </View>
-            ) : null}
+            {/* Min Order Quantity Info */}
+            {!isOutOfStock && product.minOrderQuantity > 1 && (
+              <Text style={styles.minOrderText}>
+                Min {product.minOrderQuantity} units
+              </Text>
+            )}
 
+            {/* Compatibility Info (List View) */}
+            {isList &&
+              product.compatibility &&
+              product.compatibility.length > 0 && (
+                <View style={styles.compatRow}>
+                  <Feather
+                    name="smartphone"
+                    size={wp("2.5%")}
+                    color={Colors.textMuted}
+                  />
+                  <Text style={styles.compatText} numberOfLines={1}>
+                    {product.compatibility.slice(0, 2).join(", ")}
+                    {product.compatibility.length > 2
+                      ? ` +${product.compatibility.length - 2}`
+                      : ""}
+                  </Text>
+                </View>
+              )}
+
+            {/* List View Tag */}
             {isList && !hideTags && tagConfig && (
               <View style={[styles.listTag, { backgroundColor: tagConfig.bg }]}>
-                <View
-                  style={[styles.tagDot, { backgroundColor: tagConfig.dot }]}
-                />
+                {tagConfig.icon && (
+                  <Feather
+                    name={tagConfig.icon as any}
+                    size={wp("2.5%")}
+                    color={tagConfig.dot}
+                  />
+                )}
                 <Text style={[styles.listTagText, { color: tagConfig.text }]}>
                   {primaryTag}
                 </Text>
@@ -370,32 +598,59 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  imagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surfaceAlt,
+  },
   imageOverlay: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: "50%",
+    height: "55%",
   },
   discountBadge: {
     position: "absolute",
     top: wp("2%"),
     left: wp("2%"),
-    backgroundColor: "#14803C",
+    backgroundColor: "#FF3B30",
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.4%"),
     borderRadius: wp("1.5%"),
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   discountText: {
     fontSize: wp("2.6%"),
     fontWeight: "800",
     color: "#fff",
     letterSpacing: 0.3,
+  },
+  fastMovingBadge: {
+    position: "absolute",
+    top: wp("2%"),
+    right: wp("2%"),
+    backgroundColor: "#FF6B00",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.4%"),
+    borderRadius: wp("1.5%"),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  fastMovingText: {
+    fontSize: wp("2.3%"),
+    fontWeight: "800",
+    color: "#fff",
   },
   imageTag: {
     position: "absolute",
@@ -413,65 +668,67 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  tagDot: {
-    width: wp("1.5%"),
-    height: wp("1.5%"),
-    borderRadius: wp("0.75%"),
-  },
   imageTagText: {
     fontSize: wp("2.4%"),
     fontWeight: "700",
     letterSpacing: 0.2,
   },
+  imageCountBadge: {
+    position: "absolute",
+    bottom: wp("2%"),
+    right: wp("2%"),
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: wp("2%"),
+    paddingVertical: hp("0.2%"),
+    borderRadius: wp("1.5%"),
+  },
+  imageCountText: {
+    fontSize: wp("2%"),
+    fontWeight: "600",
+    color: "#fff",
+  },
   stockPill: {
     position: "absolute",
     top: wp("2%"),
     right: wp("2%"),
-    backgroundColor: "rgba(255,243,224,0.95)",
-    borderWidth: 1,
-    borderColor: "rgba(255,160,0,0.5)",
+    backgroundColor: "rgba(255,152,0,0.95)",
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.3%"),
     borderRadius: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.15,
     shadowRadius: 2,
-    elevation: 1,
+    elevation: 2,
   },
   stockPillText: {
     fontSize: wp("2.2%"),
     fontWeight: "700",
-    color: "#C75B00",
+    color: "#fff",
   },
   oosOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
+    gap: hp("1%"),
   },
   oosText: {
     fontSize: wp("3.8%"),
     fontWeight: "800",
     color: "#fff",
-    backgroundColor: "rgba(0,0,0,0.3)",
-    paddingHorizontal: wp("4%"),
-    paddingVertical: hp("0.8%"),
-    borderRadius: wp("2%"),
-    overflow: "hidden",
     letterSpacing: 0.5,
   },
   wishBtn: {
     position: "absolute",
-    top: wp("2%"),
+    top: wp("16%"),
     right: wp("2%"),
     width: wp("8%"),
     height: wp("8%"),
     borderRadius: wp("4%"),
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: "rgba(0,0,0,0.25)",
     alignItems: "center",
     justifyContent: "center",
-    backdropFilter: "blur(4px)",
   },
   wishIconShadow: {
     textShadowColor: "rgba(0,0,0,0.3)",
@@ -485,7 +742,7 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: wp("3%"),
     paddingBottom: hp("1%"),
-    paddingTop: hp("2%"),
+    paddingTop: hp("3%"),
   },
   imageTextOverlayList: {
     paddingHorizontal: wp("2.5%"),
@@ -519,22 +776,24 @@ const styles = StyleSheet.create({
     fontSize: wp("3.5%"),
     lineHeight: wp("4.5%"),
   },
-  imageUnit: {
-    fontSize: wp("2.8%"),
+  imageMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2%"),
+  },
+  imageTypeText: {
+    fontSize: wp("2.5%"),
     fontWeight: "500",
-    color: "rgba(255,255,255,0.85)",
+    color: "rgba(255,255,255,0.8)",
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-  imageUnitList: {
-    fontSize: wp("2.5%"),
   },
 
   // ── Content Section ────────────────────────────────────────────────────
   content: {
     paddingHorizontal: wp("3%"),
-    paddingTop: hp("1%"),
+    paddingTop: hp("0.8%"),
     paddingBottom: hp("1.2%"),
     backgroundColor: Colors.surface,
   },
@@ -544,6 +803,69 @@ const styles = StyleSheet.create({
     paddingTop: hp("1.2%"),
     paddingBottom: hp("1.2%"),
     justifyContent: "space-between",
+  },
+
+  // Specifications
+  specRow: {
+    flexDirection: "row",
+    gap: wp("1.5%"),
+    flexWrap: "wrap",
+    marginBottom: hp("0.4%"),
+  },
+  specText: {
+    fontSize: wp("2.3%"),
+    color: Colors.textSecondary,
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("1.5%"),
+    paddingVertical: hp("0.1%"),
+    borderRadius: wp("1%"),
+    fontWeight: "500",
+  },
+
+  // Attributes
+  attributeRow: {
+    flexDirection: "row",
+    gap: wp("1.5%"),
+    marginBottom: hp("0.4%"),
+  },
+  attributeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("0.8%"),
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("1.5%"),
+    paddingVertical: hp("0.1%"),
+    borderRadius: wp("1%"),
+  },
+  colorDot: {
+    width: wp("2%"),
+    height: wp("2%"),
+    borderRadius: wp("1%"),
+    borderWidth: 0.5,
+    borderColor: Colors.border,
+  },
+  attributeText: {
+    fontSize: wp("2.3%"),
+    color: Colors.textSecondary,
+    fontWeight: "500",
+  },
+
+  // Warranty
+  warrantyBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: wp("0.8%"),
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: wp("1.5%"),
+    paddingVertical: hp("0.1%"),
+    borderRadius: wp("1%"),
+    marginBottom: hp("0.4%"),
+  },
+  warrantyText: {
+    fontSize: wp("2.2%"),
+    fontWeight: "600",
+    color: Colors.primary,
   },
 
   // ── Price row ──────────────────────────────────────────────────────────
@@ -668,31 +990,25 @@ const styles = StyleSheet.create({
     fontSize: wp("2.8%"),
   },
 
-  // ── Rating ─────────────────────────────────────────────────────────────
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("1.5%"),
-    marginTop: hp("0.8%"),
-  },
-  ratingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("0.6%"),
-    backgroundColor: "#2E7D32",
-    paddingHorizontal: wp("1.8%"),
-    paddingVertical: hp("0.2%"),
-    borderRadius: wp("1%"),
-  },
-  ratingVal: {
-    fontSize: wp("2.6%"),
-    fontWeight: "700",
-    color: "#fff",
-  },
-  reviewCount: {
+  // Min Order Text
+  minOrderText: {
     fontSize: wp("2.4%"),
     color: Colors.textMuted,
     fontWeight: "500",
+    marginTop: hp("0.5%"),
+  },
+
+  // Compatibility Row (List View)
+  compatRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    marginTop: hp("0.5%"),
+  },
+  compatText: {
+    fontSize: wp("2.4%"),
+    color: Colors.textSecondary,
+    flex: 1,
   },
 
   // ── List View Tag ──────────────────────────────────────────────────────

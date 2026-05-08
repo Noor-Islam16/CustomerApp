@@ -1,3 +1,4 @@
+// app/product/[id].tsx
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
@@ -23,14 +24,41 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ProductCard from "../../components/ProductCard";
 import Colors from "../../constants/colors";
-import {
-  Product,
-  getProductById,
-  getProductsByCategory,
-} from "../../constants/products";
+import { Product } from "../../constants/products";
 import { useCart } from "../../context/CartContext";
+import { ApiProduct, fetchProducts } from "../services/productApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const BASE_URL = "https://customer-7bcb.onrender.com";
+
+// Map API product to app Product format
+const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
+  return {
+    id: apiProduct._id,
+    name: apiProduct.name,
+    brand: apiProduct.brand || "",
+    category: apiProduct.category,
+    subCategory: apiProduct.subCategory || "",
+    type: apiProduct.type || "",
+    compatibility: apiProduct.compatibility || [],
+    sellingPrice: apiProduct.sellingPrice,
+    originalPrice: apiProduct.originalPrice || apiProduct.sellingPrice * 1.2,
+    color: apiProduct.color || "",
+    material: apiProduct.material || "",
+    dimensions: apiProduct.dimensions || "",
+    weight: apiProduct.weight || "",
+    warranty: apiProduct.warranty || "No Warranty",
+    stockQuantity: apiProduct.stockQuantity,
+    minOrderQuantity: apiProduct.minOrderQuantity,
+    description: apiProduct.description || "",
+    images: apiProduct.images || [],
+    specifications: apiProduct.specifications || {},
+    tags: apiProduct.tags || [],
+    inStock: apiProduct.stockQuantity > 0,
+    isFastMoving: apiProduct.isFastMoving || false,
+    isFeatured: apiProduct.isFeatured || false,
+  };
+};
 
 const ProductDetailsScreen: React.FC = () => {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,39 +69,75 @@ const ProductDetailsScreen: React.FC = () => {
   // ── State ──
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<"details" | "specifications">(
     "details",
   );
+  const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
 
   // ── Refs ──
   const scrollY = useRef(new Animated.Value(0)).current;
   const imageScrollRef = useRef<ScrollView>(null);
 
-  // ── Load Product ──
+  // ── Fetch Product from API ──
   useEffect(() => {
-    if (id) {
-      const foundProduct = getProductById(id);
-      if (foundProduct) {
-        setProduct(foundProduct);
-        const categoryProducts = getProductsByCategory(foundProduct.category)
-          .filter((p) => p.id !== id)
-          .slice(0, 6);
-        setSimilarProducts(categoryProducts);
+    const fetchProductDetails = async () => {
+      if (!id) return;
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        console.log("📡 Fetching electronics product:", id);
+
+        const response = await fetch(`${BASE_URL}/api/products/${id}`);
+        const data = await response.json();
+
+        if (!data.success || !data.data) {
+          throw new Error(data.message || "Product not found");
+        }
+
+        const apiProduct = data.data;
+        const mappedProduct = mapApiProductToAppProduct(apiProduct);
+        setProduct(mappedProduct);
+        console.log("✅ Product loaded:", mappedProduct.name);
+
+        // Fetch similar products from same category
+        try {
+          const similarData = await fetchProducts({
+            category: apiProduct.category,
+            limit: 6,
+          });
+
+          const filtered = similarData
+            .filter((p) => p._id !== id)
+            .map(mapApiProductToAppProduct)
+            .slice(0, 6);
+
+          setSimilarProducts(filtered);
+        } catch (similarError) {
+          console.error("Failed to fetch similar products:", similarError);
+        }
+      } catch (err: any) {
+        console.error("❌ Error fetching product:", err);
+        setError(err.message || "Failed to load product");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    }
+    };
+
+    fetchProductDetails();
   }, [id]);
 
-  // ── Sync local quantity with cart whenever cart changes ──
+  // ── Sync local quantity with cart ──
   const currentCartQuantity = product ? getCartQuantity(product.id) : 0;
   const isInCart = currentCartQuantity > 0;
 
   useEffect(() => {
     if (isInCart) {
-      // Keep local quantity in sync with what's actually in the cart
       setQuantity(currentCartQuantity);
     }
   }, [currentCartQuantity, isInCart]);
@@ -104,31 +168,24 @@ const ProductDetailsScreen: React.FC = () => {
         style: "destructive",
         onPress: () => {
           removeFromCart(product.id);
-          setQuantity(1); // reset local quantity
+          setQuantity(1);
         },
       },
     ]);
   };
 
-  /**
-   * Quantity change handler.
-   * - If item is already in cart  → directly update cart quantity (live sync).
-   * - If item is NOT in cart yet  → just update local state so the user can
-   *   pick how many they want before pressing "Add to Cart".
-   */
   const handleQuantityChange = (change: number) => {
     if (!product) return;
 
     if (isInCart) {
       const next = Math.max(
         1,
-        Math.min(product.stock, currentCartQuantity + change),
+        Math.min(product.stockQuantity, currentCartQuantity + change),
       );
       updateQuantity(product.id, next);
-      // local quantity stays in sync via the useEffect above
     } else {
       setQuantity((prev) =>
-        Math.max(1, Math.min(product.stock, prev + change)),
+        Math.max(1, Math.min(product.stockQuantity, prev + change)),
       );
     }
   };
@@ -146,7 +203,8 @@ const ProductDetailsScreen: React.FC = () => {
     extrapolate: "clamp",
   });
 
-  if (loading || !product) {
+  // ── Loading State ──
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <StatusBar
@@ -155,16 +213,54 @@ const ProductDetailsScreen: React.FC = () => {
           translucent
         />
         <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading product...</Text>
+      </View>
+    );
+  }
+
+  // ── Error State ──
+  if (error || !product) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="transparent"
+          translucent
+        />
+        <MaterialCommunityIcons
+          name="devices"
+          size={wp("20%")}
+          color={Colors.textMuted}
+        />
+        <Text style={styles.errorText}>{error || "Product not found"}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.retryButtonText}>Go Back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   const isOutOfStock = !product.inStock;
-  const discount = product.discount || 0;
-  const hasDiscount = discount > 0;
+  const hasDiscount =
+    product.originalPrice > 0 && product.sellingPrice < product.originalPrice;
+  const discountPercentage = hasDiscount
+    ? Math.round(
+        ((product.originalPrice - product.sellingPrice) /
+          product.originalPrice) *
+          100,
+      )
+    : 0;
 
-  // Which quantity value to display in the selector
   const displayQuantity = isInCart ? currentCartQuantity : quantity;
+
+  // Create image array from product images
+  const productImages =
+    product.images && product.images.length > 0
+      ? product.images.map((img) => img.url)
+      : ["https://via.placeholder.com/300"];
 
   return (
     <View style={styles.root}>
@@ -267,43 +363,105 @@ const ProductDetailsScreen: React.FC = () => {
               setCurrentImageIndex(index);
             }}
           >
-            {product.images.map((image, index) => (
-              <Image
-                key={index}
-                source={{ uri: image }}
-                style={styles.productImage}
-                resizeMode="cover"
-              />
+            {productImages.map((image, index) => (
+              <View key={index} style={styles.imageContainer}>
+                {imageErrors.has(index) ? (
+                  <View style={styles.imagePlaceholder}>
+                    <MaterialCommunityIcons
+                      name="devices"
+                      size={wp("20%")}
+                      color={Colors.border}
+                    />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: image }}
+                    style={styles.productImage}
+                    resizeMode="cover"
+                    onError={() =>
+                      setImageErrors((prev) => new Set(prev).add(index))
+                    }
+                  />
+                )}
+              </View>
             ))}
           </ScrollView>
 
-          <View style={styles.imageIndicators}>
-            {product.images.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.indicator,
-                  currentImageIndex === index && styles.indicatorActive,
-                ]}
-              />
-            ))}
-          </View>
+          {/* Image indicators */}
+          {productImages.length > 1 && (
+            <View style={styles.imageIndicators}>
+              {productImages.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.indicator,
+                    currentImageIndex === index && styles.indicatorActive,
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Image count badge */}
+          {productImages.length > 1 && (
+            <View style={styles.imageCountBadge}>
+              <Text style={styles.imageCountText}>
+                {currentImageIndex + 1}/{productImages.length}
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.infoContainer}>
-          {product.brand && <Text style={styles.brand}>{product.brand}</Text>}
-          <Text style={styles.name}>{product.name}</Text>
-          <Text style={styles.unit}>{product.weight || product.unit}</Text>
-
-          <View style={styles.ratingRow}>
-            <View style={styles.ratingBadge}>
-              <Text style={styles.ratingValue}>{product.rating}</Text>
-              <Feather name="star" size={wp("3%")} color="#fff" />
+          {/* Brand & Category */}
+          <View style={styles.metaRow}>
+            {product.brand ? (
+              <Text style={styles.brand}>{product.brand}</Text>
+            ) : null}
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryText}>
+                {product.subCategory || product.category}
+              </Text>
             </View>
-            <Text style={styles.ratingCount}>
-              {product.reviewCount?.toLocaleString("en-IN")} ratings
-            </Text>
-            {product.fastMoving && (
+          </View>
+
+          {/* Product Name */}
+          <Text style={styles.name}>{product.name}</Text>
+
+          {/* Type & Compatibility */}
+          <View style={styles.quickInfoRow}>
+            {product.type && (
+              <View style={styles.quickInfoChip}>
+                <Feather name="tag" size={wp("3%")} color={Colors.primary} />
+                <Text style={styles.quickInfoText}>{product.type}</Text>
+              </View>
+            )}
+            {product.compatibility && product.compatibility.length > 0 && (
+              <View style={styles.quickInfoChip}>
+                <Feather
+                  name="smartphone"
+                  size={wp("3%")}
+                  color={Colors.primary}
+                />
+                <Text style={styles.quickInfoText}>
+                  {product.compatibility.slice(0, 2).join(", ")}
+                  {product.compatibility.length > 2
+                    ? ` +${product.compatibility.length - 2}`
+                    : ""}
+                </Text>
+              </View>
+            )}
+            {product.warranty && product.warranty !== "No Warranty" && (
+              <View style={styles.quickInfoChip}>
+                <Feather name="shield" size={wp("3%")} color={Colors.success} />
+                <Text style={styles.quickInfoText}>{product.warranty}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Fast Moving & Featured Badges */}
+          <View style={styles.badgesRow}>
+            {product.isFastMoving && (
               <View style={styles.fastMovingBadge}>
                 <MaterialCommunityIcons
                   name="fire"
@@ -313,24 +471,98 @@ const ProductDetailsScreen: React.FC = () => {
                 <Text style={styles.fastMovingText}>Fast Moving</Text>
               </View>
             )}
+            {product.isFeatured && (
+              <View style={styles.featuredBadge}>
+                <Feather name="star" size={wp("3.2%")} color="#F9A825" />
+                <Text style={styles.featuredText}>Featured</Text>
+              </View>
+            )}
           </View>
+
+          {/* Color & Material */}
+          {(product.color ||
+            product.material ||
+            product.dimensions ||
+            product.weight) && (
+            <View style={styles.attributesRow}>
+              {product.color && (
+                <View style={styles.attributeChip}>
+                  <View
+                    style={[
+                      styles.colorDot,
+                      {
+                        backgroundColor:
+                          product.color.toLowerCase() === "black"
+                            ? "#000"
+                            : product.color.toLowerCase() === "white"
+                              ? "#ddd"
+                              : product.color.toLowerCase() === "silver"
+                                ? "#C0C0C0"
+                                : product.color.toLowerCase() === "gold"
+                                  ? "#FFD700"
+                                  : product.color.toLowerCase() === "rose gold"
+                                    ? "#B76E79"
+                                    : product.color.toLowerCase() === "blue"
+                                      ? "#2196F3"
+                                      : product.color.toLowerCase() === "red"
+                                        ? "#F44336"
+                                        : Colors.primary,
+                      },
+                    ]}
+                  />
+                  <Text style={styles.attributeText}>{product.color}</Text>
+                </View>
+              )}
+              {product.material && (
+                <View style={styles.attributeChip}>
+                  <Feather
+                    name="shield"
+                    size={wp("2.8%")}
+                    color={Colors.textMuted}
+                  />
+                  <Text style={styles.attributeText}>{product.material}</Text>
+                </View>
+              )}
+              {product.dimensions && (
+                <View style={styles.attributeChip}>
+                  <Feather
+                    name="maximize"
+                    size={wp("2.8%")}
+                    color={Colors.textMuted}
+                  />
+                  <Text style={styles.attributeText}>{product.dimensions}</Text>
+                </View>
+              )}
+              {product.weight && (
+                <View style={styles.attributeChip}>
+                  <Feather
+                    name="package"
+                    size={wp("2.8%")}
+                    color={Colors.textMuted}
+                  />
+                  <Text style={styles.attributeText}>{product.weight}</Text>
+                </View>
+              )}
+            </View>
+          )}
 
           <View style={styles.divider} />
 
+          {/* Price Section */}
           <View style={styles.priceSection}>
             <View>
               <View style={styles.priceMain}>
                 <Text style={styles.currency}>₹</Text>
-                <Text style={styles.price}>{product.price}</Text>
+                <Text style={styles.price}>{product.sellingPrice}</Text>
                 {hasDiscount && (
                   <View style={styles.discountBadgeInline}>
                     <Text style={styles.discountTextInline}>
-                      {discount}% OFF
+                      {discountPercentage}% OFF
                     </Text>
                   </View>
                 )}
               </View>
-              {hasDiscount && product.originalPrice && (
+              {hasDiscount && (
                 <Text style={styles.originalPrice}>
                   MRP: ₹{product.originalPrice}
                 </Text>
@@ -355,13 +587,14 @@ const ProductDetailsScreen: React.FC = () => {
               >
                 {isOutOfStock
                   ? "Out of Stock"
-                  : `In Stock (${product.stock} available)`}
+                  : `In Stock (${product.stockQuantity} available)`}
               </Text>
             </View>
           </View>
 
           <View style={styles.divider} />
 
+          {/* Quantity Selector */}
           {!isOutOfStock && (
             <View style={styles.quantitySection}>
               <Text style={styles.quantityLabel}>Quantity</Text>
@@ -384,10 +617,11 @@ const ProductDetailsScreen: React.FC = () => {
                 <TouchableOpacity
                   style={[
                     styles.qtyBtn,
-                    displayQuantity >= product.stock && styles.qtyBtnDisabled,
+                    displayQuantity >= product.stockQuantity &&
+                      styles.qtyBtnDisabled,
                   ]}
                   onPress={() => handleQuantityChange(1)}
-                  disabled={displayQuantity >= product.stock}
+                  disabled={displayQuantity >= product.stockQuantity}
                 >
                   <Feather
                     name="plus"
@@ -399,6 +633,7 @@ const ProductDetailsScreen: React.FC = () => {
             </View>
           )}
 
+          {/* Tabs */}
           <View style={styles.tabContainer}>
             <TouchableOpacity
               style={[styles.tab, activeTab === "details" && styles.tabActive]}
@@ -435,11 +670,51 @@ const ProductDetailsScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
 
+          {/* Tab Content */}
           <View style={styles.tabContent}>
             {activeTab === "details" ? (
-              <Text style={styles.description}>{product.description}</Text>
+              <View>
+                <Text style={styles.description}>
+                  {product.description || "No description available."}
+                </Text>
+
+                {/* Tags */}
+                {product.tags.length > 0 && (
+                  <View style={styles.tagsSection}>
+                    <Text style={styles.tagsTitle}>Product Tags</Text>
+                    <View style={styles.tagsContainer}>
+                      {product.tags.map((tag, index) => (
+                        <View key={index} style={styles.tagChip}>
+                          <Text style={styles.tagChipText}>{tag}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </View>
             ) : (
               <View style={styles.specsContainer}>
+                {/* Technical Specifications */}
+                {product.specifications &&
+                  Object.keys(product.specifications).length > 0 && (
+                    <>
+                      <Text style={styles.specSectionTitle}>
+                        Technical Specifications
+                      </Text>
+                      {Object.entries(product.specifications).map(
+                        ([key, value]) => (
+                          <View key={key} style={styles.specRow}>
+                            <Text style={styles.specLabel}>{key}</Text>
+                            <Text style={styles.specValue}>{value}</Text>
+                          </View>
+                        ),
+                      )}
+                      <View style={styles.specDivider} />
+                    </>
+                  )}
+
+                {/* General Info */}
+                <Text style={styles.specSectionTitle}>Product Information</Text>
                 <View style={styles.specRow}>
                   <Text style={styles.specLabel}>Brand</Text>
                   <Text style={styles.specValue}>{product.brand || "N/A"}</Text>
@@ -448,44 +723,81 @@ const ProductDetailsScreen: React.FC = () => {
                   <Text style={styles.specLabel}>Category</Text>
                   <Text style={styles.specValue}>{product.category}</Text>
                 </View>
+                {product.subCategory && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Sub Category</Text>
+                    <Text style={styles.specValue}>{product.subCategory}</Text>
+                  </View>
+                )}
+                {product.type && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Type</Text>
+                    <Text style={styles.specValue}>{product.type}</Text>
+                  </View>
+                )}
+                {product.color && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Color</Text>
+                    <Text style={styles.specValue}>{product.color}</Text>
+                  </View>
+                )}
+                {product.material && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Material</Text>
+                    <Text style={styles.specValue}>{product.material}</Text>
+                  </View>
+                )}
+                {product.dimensions && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Dimensions</Text>
+                    <Text style={styles.specValue}>{product.dimensions}</Text>
+                  </View>
+                )}
+                {product.weight && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Weight</Text>
+                    <Text style={styles.specValue}>{product.weight}</Text>
+                  </View>
+                )}
                 <View style={styles.specRow}>
-                  <Text style={styles.specLabel}>Sub Category</Text>
+                  <Text style={styles.specLabel}>Warranty</Text>
                   <Text style={styles.specValue}>
-                    {product.subCategory || "N/A"}
-                  </Text>
-                </View>
-                <View style={styles.specRow}>
-                  <Text style={styles.specLabel}>Unit</Text>
-                  <Text style={styles.specValue}>{product.unit}</Text>
-                </View>
-                <View style={styles.specRow}>
-                  <Text style={styles.specLabel}>Weight</Text>
-                  <Text style={styles.specValue}>
-                    {product.weight || "N/A"}
+                    {product.warranty || "No Warranty"}
                   </Text>
                 </View>
                 <View style={styles.specRow}>
                   <Text style={styles.specLabel}>Min Order Qty</Text>
                   <Text style={styles.specValue}>
-                    {product.minOrderQty || 1}
+                    {product.minOrderQuantity}
                   </Text>
                 </View>
-                <View style={styles.specRow}>
-                  <Text style={styles.specLabel}>Tags</Text>
-                  <View style={styles.specTags}>
-                    {product.tags.map((tag, index) => (
-                      <View key={index} style={styles.specTag}>
-                        <Text style={styles.specTagText}>{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
+
+                {/* Compatibility */}
+                {product.compatibility && product.compatibility.length > 0 && (
+                  <>
+                    <View style={styles.specDivider} />
+                    <Text style={styles.specSectionTitle}>Compatibility</Text>
+                    <View style={styles.compatContainer}>
+                      {product.compatibility.map((comp, index) => (
+                        <View key={index} style={styles.compatChip}>
+                          <Feather
+                            name="smartphone"
+                            size={wp("3%")}
+                            color={Colors.primary}
+                          />
+                          <Text style={styles.compatChipText}>{comp}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                )}
               </View>
             )}
           </View>
 
           <View style={styles.divider} />
 
+          {/* Similar Products */}
           {similarProducts.length > 0 && (
             <View style={styles.similarSection}>
               <View style={styles.similarHeader}>
@@ -523,9 +835,7 @@ const ProductDetailsScreen: React.FC = () => {
           ) : (
             <>
               {isInCart ? (
-                /* ── Go to Cart + Delete + Buy Now row ── */
                 <View style={styles.goToCartRow}>
-                  {/* Delete / remove button */}
                   <TouchableOpacity
                     style={styles.deleteBtn}
                     onPress={handleRemoveFromCart}
@@ -537,8 +847,6 @@ const ProductDetailsScreen: React.FC = () => {
                       color={Colors.error}
                     />
                   </TouchableOpacity>
-
-                  {/* Go to Cart */}
                   <TouchableOpacity
                     style={styles.goToCartBtn}
                     onPress={handleGoToCart}
@@ -556,8 +864,6 @@ const ProductDetailsScreen: React.FC = () => {
                       </Text>
                     </View>
                   </TouchableOpacity>
-
-                  {/* Buy Now */}
                   <TouchableOpacity
                     style={styles.buyNowBtn}
                     onPress={handleBuyNow}
@@ -579,7 +885,6 @@ const ProductDetailsScreen: React.FC = () => {
                   </TouchableOpacity>
                 </View>
               ) : (
-                /* ── Add to Cart + Buy Now row ── */
                 <>
                   <TouchableOpacity
                     style={styles.addToCartBtn}
@@ -633,6 +938,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: Colors.white,
+    paddingHorizontal: wp("10%"),
+  },
+  loadingText: {
+    fontSize: wp("3.5%"),
+    color: Colors.textSecondary,
+    marginTop: hp("2%"),
+  },
+  errorText: {
+    fontSize: wp("4%"),
+    color: Colors.textPrimary,
+    marginTop: hp("2%"),
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: hp("3%"),
+    backgroundColor: Colors.primary,
+    paddingHorizontal: wp("8%"),
+    paddingVertical: hp("1.5%"),
+    borderRadius: wp("3%"),
+  },
+  retryButtonText: {
+    fontSize: wp("3.5%"),
+    fontWeight: "700",
+    color: Colors.white,
   },
 
   // ── Header ──
@@ -682,6 +1011,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerCartBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: Colors.primary,
+    minWidth: wp("4.5%"),
+    height: wp("4.5%"),
+    borderRadius: wp("2.25%"),
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: Colors.white,
+  },
+  headerCartBadgeText: {
+    fontSize: wp("2.2%"),
+    fontWeight: "800",
+    color: Colors.white,
+  },
   floatingBackBtn: {
     position: "absolute",
     left: wp("4%"),
@@ -703,9 +1050,21 @@ const styles = StyleSheet.create({
   imageCarousel: {
     position: "relative",
   },
+  imageContainer: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH,
+    backgroundColor: Colors.surfaceAlt,
+  },
   productImage: {
     width: SCREEN_WIDTH,
     height: SCREEN_WIDTH,
+    backgroundColor: Colors.surfaceAlt,
+  },
+  imagePlaceholder: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: Colors.surfaceAlt,
   },
   imageIndicators: {
@@ -727,54 +1086,81 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     width: wp("6%"),
   },
+  imageCountBadge: {
+    position: "absolute",
+    top: wp("3%"),
+    right: wp("4%"),
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: wp("3%"),
+    paddingVertical: hp("0.4%"),
+    borderRadius: wp("3%"),
+  },
+  imageCountText: {
+    fontSize: wp("3%"),
+    fontWeight: "600",
+    color: Colors.white,
+  },
 
   // ── Product Info ──
   infoContainer: {
     paddingHorizontal: wp("4%"),
     paddingTop: hp("2%"),
   },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2%"),
+    marginBottom: hp("0.8%"),
+  },
   brand: {
     fontSize: wp("3.2%"),
     fontWeight: "600",
-    color: Colors.textMuted,
+    color: Colors.primary,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: hp("0.5%"),
+  },
+  categoryBadge: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.3%"),
+    borderRadius: wp("2%"),
+  },
+  categoryText: {
+    fontSize: wp("2.8%"),
+    fontWeight: "600",
+    color: Colors.primary,
   },
   name: {
     fontSize: wp("5.5%"),
     fontWeight: "800",
     color: Colors.textPrimary,
     lineHeight: wp("7%"),
-    marginBottom: hp("0.5%"),
+    marginBottom: hp("1%"),
   },
-  unit: {
-    fontSize: wp("3.5%"),
-    color: Colors.textSecondary,
-    marginBottom: hp("1.2%"),
-  },
-  ratingRow: {
+  quickInfoRow: {
     flexDirection: "row",
-    alignItems: "center",
+    flexWrap: "wrap",
     gap: wp("2%"),
+    marginBottom: hp("1%"),
   },
-  ratingBadge: {
+  quickInfoChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: wp("0.8%"),
-    backgroundColor: "#2E7D32",
+    gap: wp("1%"),
+    backgroundColor: Colors.surfaceAlt,
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.4%"),
-    borderRadius: wp("1.5%"),
+    borderRadius: wp("3%"),
   },
-  ratingValue: {
-    fontSize: wp("3.5%"),
-    fontWeight: "700",
-    color: Colors.white,
+  quickInfoText: {
+    fontSize: wp("3%"),
+    color: Colors.textSecondary,
+    fontWeight: "500",
   },
-  ratingCount: {
-    fontSize: wp("3.2%"),
-    color: Colors.textMuted,
+  badgesRow: {
+    flexDirection: "row",
+    gap: wp("2%"),
+    marginBottom: hp("1%"),
   },
   fastMovingBadge: {
     flexDirection: "row",
@@ -784,36 +1170,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
-    marginLeft: "auto",
   },
   fastMovingText: {
     fontSize: wp("2.8%"),
     fontWeight: "600",
     color: "#E65100",
   },
+  featuredBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    backgroundColor: "#FFF8E1",
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.4%"),
+    borderRadius: wp("3%"),
+  },
+  featuredText: {
+    fontSize: wp("2.8%"),
+    fontWeight: "600",
+    color: "#F57F17",
+  },
+  attributesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: wp("2%"),
+    marginBottom: hp("1%"),
+  },
+  attributeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.4%"),
+    borderRadius: wp("3%"),
+  },
+  colorDot: {
+    width: wp("3%"),
+    height: wp("3%"),
+    borderRadius: wp("1.5%"),
+    borderWidth: 0.5,
+    borderColor: Colors.border,
+  },
+  attributeText: {
+    fontSize: wp("2.8%"),
+    color: Colors.textSecondary,
+    fontWeight: "500",
+  },
   divider: {
     height: 1,
     backgroundColor: Colors.border,
     marginVertical: hp("2%"),
-  },
-
-  headerCartBadge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    backgroundColor: Colors.primary,
-    minWidth: wp("4.5%"),
-    height: wp("4.5%"),
-    borderRadius: wp("2.25%"),
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: Colors.white,
-  },
-  headerCartBadgeText: {
-    fontSize: wp("2.2%"),
-    fontWeight: "800",
-    color: Colors.white,
   },
 
   // ── Price Section ──
@@ -839,7 +1246,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   discountBadgeInline: {
-    backgroundColor: "#14803C",
+    backgroundColor: "#FF3B30",
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.3%"),
     borderRadius: wp("1.5%"),
@@ -870,7 +1277,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // ── Quantity Selector ──
+  // ── Quantity ──
   quantitySection: {
     flexDirection: "row",
     alignItems: "center",
@@ -924,7 +1331,6 @@ const styles = StyleSheet.create({
     paddingVertical: hp("1.5%"),
     position: "relative",
   },
-  tabActive: {},
   tabText: {
     fontSize: wp("3.8%"),
     fontWeight: "500",
@@ -949,43 +1355,92 @@ const styles = StyleSheet.create({
     fontSize: wp("3.5%"),
     color: Colors.textSecondary,
     lineHeight: wp("5.5%"),
+    marginBottom: hp("2%"),
   },
 
-  // ── Specifications ──
-  specsContainer: {
-    gap: hp("1.5%"),
+  // ── Tags ──
+  tagsSection: {
+    marginTop: hp("1%"),
   },
-  specRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  specLabel: {
-    width: wp("30%"),
+  tagsTitle: {
     fontSize: wp("3.5%"),
-    fontWeight: "500",
-    color: Colors.textMuted,
-  },
-  specValue: {
-    flex: 1,
-    fontSize: wp("3.5%"),
+    fontWeight: "600",
     color: Colors.textPrimary,
+    marginBottom: hp("1%"),
   },
-  specTags: {
-    flex: 1,
+  tagsContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: wp("1.5%"),
+    gap: wp("2%"),
   },
-  specTag: {
+  tagChip: {
     backgroundColor: Colors.primaryLight,
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  specTagText: {
+  tagChipText: {
     fontSize: wp("2.8%"),
     color: Colors.primary,
     fontWeight: "600",
+  },
+
+  // ── Specifications ──
+  specsContainer: {
+    gap: hp("0.5%"),
+  },
+  specSectionTitle: {
+    fontSize: wp("3.8%"),
+    fontWeight: "700",
+    color: Colors.textPrimary,
+    marginBottom: hp("1%"),
+    marginTop: hp("0.5%"),
+  },
+  specRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: hp("0.8%"),
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.border,
+  },
+  specLabel: {
+    width: wp("32%"),
+    fontSize: wp("3.3%"),
+    fontWeight: "500",
+    color: Colors.textMuted,
+  },
+  specValue: {
+    flex: 1,
+    fontSize: wp("3.3%"),
+    color: Colors.textPrimary,
+    fontWeight: "500",
+  },
+  specDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: hp("1%"),
+  },
+  compatContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: wp("2%"),
+    marginTop: hp("0.5%"),
+  },
+  compatChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.5%"),
+    borderRadius: wp("3%"),
+    borderWidth: 1,
+    borderColor: Colors.accentLight,
+  },
+  compatChipText: {
+    fontSize: wp("3%"),
+    color: Colors.primary,
+    fontWeight: "500",
   },
 
   // ── Similar Products ──

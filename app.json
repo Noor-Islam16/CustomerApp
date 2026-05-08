@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "CustomerApp",
-    "slug": "CustomerApp",
+    "name": "JholeSaler",
+    "slug": "JholeSaler",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "customerapp",
+    "scheme": "jholesaler",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -20,7 +20,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.asrtech123.CustomerApp"
+      "package": "com.asrtech123.JholeSaler"
     },
     "web": {
       "output": "static",
@@ -37,7 +37,7 @@
           "resizeMode": "contain",
           "dark": {
             "image": "./assets/images/splash-icon-dark.png",
-            "backgroundColor": "#000000"
+            "backgroundColor": "#FFFFFF"
           }
         }
       ]
@@ -45,6 +45,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0697e694-f6ff-45fc-b733-068036d40c64"
+      }
     }
   }
 }

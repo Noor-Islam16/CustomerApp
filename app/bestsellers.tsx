@@ -1,13 +1,15 @@
 // app/best-sellers.tsx or screens/BestSellersScreen.tsx
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   FlatList,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -22,19 +24,40 @@ import {
 } from "react-native-responsive-screen";
 import ProductCard from "../components/ProductCard";
 import Colors from "../constants/colors";
-import {
-  CATEGORIES,
-  Product,
-  PRODUCTS,
-  ProductTag,
-} from "../constants/products";
+import { AVAILABLE_TAGS, CATEGORIES, Product } from "../constants/products";
+import { useCart } from "../context/CartContext";
+import { ApiProduct, fetchAllProducts } from "./services/productApi";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-interface CartItem {
-  product: Product;
-  quantity: number;
-}
+// ─── Helper: Convert API product to app Product format ─────────────────────
+const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
+  return {
+    id: apiProduct._id,
+    name: apiProduct.name,
+    brand: apiProduct.brand || "",
+    category: apiProduct.category,
+    subCategory: apiProduct.subCategory || "",
+    type: apiProduct.type || "",
+    compatibility: apiProduct.compatibility || [],
+    sellingPrice: apiProduct.sellingPrice,
+    originalPrice: apiProduct.originalPrice || apiProduct.sellingPrice * 1.2,
+    color: apiProduct.color || "",
+    material: apiProduct.material || "",
+    dimensions: apiProduct.dimensions || "",
+    weight: apiProduct.weight || "",
+    warranty: apiProduct.warranty || "No Warranty",
+    stockQuantity: apiProduct.stockQuantity,
+    minOrderQuantity: apiProduct.minOrderQuantity,
+    description: apiProduct.description || "",
+    images: apiProduct.images || [],
+    specifications: apiProduct.specifications || {},
+    tags: apiProduct.tags || [],
+    inStock: apiProduct.stockQuantity > 0,
+    isFastMoving: apiProduct.isFastMoving || false,
+    isFeatured: apiProduct.isFeatured || false,
+  };
+};
 
 interface FilterState {
   categories: string[];
@@ -43,7 +66,13 @@ interface FilterState {
     min: number;
     max: number;
   };
-  sortBy: "popularity" | "price_low" | "price_high" | "newest" | "rating";
+  sortBy:
+    | "popularity"
+    | "price_low"
+    | "price_high"
+    | "newest"
+    | "name_asc"
+    | "name_desc";
   inStockOnly: boolean;
   discountedOnly: boolean;
 }
@@ -53,44 +82,34 @@ const SORT_OPTIONS = [
   { id: "price_low", label: "Price: Low to High", icon: "arrow-up" },
   { id: "price_high", label: "Price: High to Low", icon: "arrow-down" },
   { id: "newest", label: "Newest First", icon: "clock" },
-  { id: "rating", label: "Customer Rating", icon: "star" },
+  { id: "name_asc", label: "Name: A to Z", icon: "sort-alpha-asc" },
+  { id: "name_desc", label: "Name: Z to A", icon: "sort-alpha-desc" },
 ] as const;
 
 const PRICE_RANGES = [
-  { label: "Under ₹100", min: 0, max: 100 },
-  { label: "₹100 - ₹300", min: 100, max: 300 },
-  { label: "₹300 - ₹500", min: 300, max: 500 },
+  { label: "Under ₹500", min: 0, max: 500 },
   { label: "₹500 - ₹1000", min: 500, max: 1000 },
-  { label: "Above ₹1000", min: 1000, max: Infinity },
-];
-
-const AVAILABLE_TAGS: ProductTag[] = [
-  "Best Seller",
-  "Fast Moving",
-  "Limited Stock",
-  "Premium",
-  "Organic",
-  "Imported",
-  "New Arrival",
-  "Special Offer",
+  { label: "₹1000 - ₹2000", min: 1000, max: 2000 },
+  { label: "₹2000 - ₹5000", min: 2000, max: 5000 },
+  { label: "Above ₹5000", min: 5000, max: Infinity },
 ];
 
 type LayoutType = "grid" | "list";
 
 const BestSellersScreen: React.FC = () => {
-  // Get only Best Seller products
-  const bestSellerProducts = PRODUCTS.filter(
-    (p) => p.tags.includes("Best Seller") && p.inStock,
-  );
+  const { addToCart, updateQuantity, getCartQuantity } = useCart();
 
   // ── State ──
-  const [filteredProducts, setFilteredProducts] =
-    useState<Product[]>(bestSellerProducts);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [bestSellerProducts, setBestSellerProducts] = useState<Product[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
   const [layout, setLayout] = useState<LayoutType>("grid");
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Filter State
   const [filters, setFilters] = useState<FilterState>({
@@ -107,10 +126,35 @@ const BestSellersScreen: React.FC = () => {
 
   // ── Refs ──
   const scrollY = useRef(new Animated.Value(0)).current;
-
-  // ── Animations ──
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+
+  // ── Fetch Products from API ──────────────────────────────────────────────
+  const loadProducts = useCallback(async () => {
+    try {
+      setError(null);
+      const apiProducts = await fetchAllProducts();
+      const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
+      setAllProducts(mappedProducts);
+
+      // Filter only Best Seller products that are in stock
+      const bestSellers = mappedProducts.filter(
+        (p) => p.tags.includes("Best Seller") && p.inStock,
+      );
+      setBestSellerProducts(bestSellers);
+      console.log(`🏆 Loaded ${bestSellers.length} best sellers from API`);
+    } catch (err: any) {
+      console.error("❌ Failed to load best sellers:", err);
+      setError(err.message || "Failed to load products");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    loadProducts();
+  }, [loadProducts]);
 
   // ── Entrance animation ──
   useEffect(() => {
@@ -134,12 +178,15 @@ const BestSellersScreen: React.FC = () => {
     let result = [...bestSellerProducts];
 
     // Search filter
-    if (searchQuery) {
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
       result = result.filter(
         (p) =>
-          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.brand?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.category.toLowerCase().includes(searchQuery.toLowerCase()),
+          p.name.toLowerCase().includes(query) ||
+          p.brand.toLowerCase().includes(query) ||
+          p.category.toLowerCase().includes(query) ||
+          p.subCategory.toLowerCase().includes(query) ||
+          p.type.toLowerCase().includes(query),
       );
     }
 
@@ -148,7 +195,7 @@ const BestSellersScreen: React.FC = () => {
       result = result.filter((p) => filters.categories.includes(p.category));
     }
 
-    // Tags filter (excluding Best Seller since it's already filtered)
+    // Tags filter
     if (filters.tags.length > 0) {
       result = result.filter((p) =>
         p.tags.some((tag) => filters.tags.includes(tag)),
@@ -158,7 +205,8 @@ const BestSellersScreen: React.FC = () => {
     // Price range
     result = result.filter(
       (p) =>
-        p.price >= filters.priceRange.min && p.price <= filters.priceRange.max,
+        p.sellingPrice >= filters.priceRange.min &&
+        p.sellingPrice <= filters.priceRange.max,
     );
 
     // In stock only
@@ -168,26 +216,36 @@ const BestSellersScreen: React.FC = () => {
 
     // Discounted only
     if (filters.discountedOnly) {
-      result = result.filter((p) => p.discount && p.discount > 0);
+      result = result.filter(
+        (p) => p.originalPrice > 0 && p.sellingPrice < p.originalPrice,
+      );
     }
 
     // Sorting
     switch (filters.sortBy) {
       case "price_low":
-        result.sort((a, b) => a.price - b.price);
+        result.sort((a, b) => a.sellingPrice - b.sellingPrice);
         break;
       case "price_high":
-        result.sort((a, b) => b.price - a.price);
+        result.sort((a, b) => b.sellingPrice - a.sellingPrice);
         break;
       case "newest":
-        result.sort((a, b) => parseInt(b.id) - parseInt(a.id));
+        result.sort((a, b) => b.id.localeCompare(a.id));
         break;
-      case "rating":
-        result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      case "name_asc":
+        result.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "name_desc":
+        result.sort((a, b) => b.name.localeCompare(a.name));
         break;
       case "popularity":
       default:
-        result.sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
+        // Sort by isFastMoving and isFeatured first
+        result.sort((a, b) => {
+          const aScore = (a.isFastMoving ? 2 : 0) + (a.isFeatured ? 1 : 0);
+          const bScore = (b.isFastMoving ? 2 : 0) + (b.isFeatured ? 1 : 0);
+          return bScore - aScore;
+        });
         break;
     }
 
@@ -202,44 +260,14 @@ const BestSellersScreen: React.FC = () => {
     if (filters.inStockOnly) count++;
     if (filters.discountedOnly) count++;
     setActiveFilterCount(count);
-  }, [filters, searchQuery]);
+  }, [filters, searchQuery, bestSellerProducts]);
 
   // ── Handlers ──
-  const handleProductPress = (product: Product) => {
-    router.push(`/product/${product.id}`);
-  };
-
-  const handleAddToCart = (product: Product) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      if (existing) {
-        return prev.map((item) =>
-          item.product.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item,
-        );
-      }
-      return [...prev, { product, quantity: 1 }];
-    });
-  };
-
-  const handleRemoveFromCart = (product: Product) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      if (!existing) return prev;
-      if (existing.quantity <= 1) {
-        return prev.filter((item) => item.product.id !== product.id);
-      }
-      return prev.map((item) =>
-        item.product.id === product.id
-          ? { ...item, quantity: item.quantity - 1 }
-          : item,
-      );
-    });
-  };
-
-  const getCartQuantity = (productId: string): number =>
-    cart.find((item) => item.product.id === productId)?.quantity || 0;
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProducts();
+    setRefreshing(false);
+  }, [loadProducts]);
 
   const applyFilters = () => {
     setFilters(tempFilters);
@@ -273,7 +301,7 @@ const BestSellersScreen: React.FC = () => {
     }));
   };
 
-  const toggleTag = (tag: ProductTag) => {
+  const toggleTag = (tag: string) => {
     setTempFilters((prev) => ({
       ...prev,
       tags: prev.tags.includes(tag)
@@ -294,7 +322,41 @@ const BestSellersScreen: React.FC = () => {
     setShowSortModal(false);
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Loading State ─────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <View style={[styles.root, styles.centerContent]}>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.gradientStart}
+        />
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading best sellers...</Text>
+      </View>
+    );
+  }
+
+  // ── Error State ───────────────────────────────────────────────────────────
+  if (error && bestSellerProducts.length === 0) {
+    return (
+      <View style={[styles.root, styles.centerContent]}>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.gradientStart}
+        />
+        <MaterialCommunityIcons
+          name="cloud-off-outline"
+          size={wp("20%")}
+          color={Colors.textMuted}
+        />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadProducts}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar
@@ -323,11 +385,11 @@ const BestSellersScreen: React.FC = () => {
           </TouchableOpacity>
           <View>
             <View style={styles.headerTitleRow}>
-              {/* <MaterialCommunityIcons
+              <MaterialCommunityIcons
                 name="trophy"
                 size={wp("5%")}
                 color="#FFD700"
-              /> */}
+              />
               <Text style={styles.headerTitle}>Best Sellers</Text>
             </View>
             <Text style={styles.headerSub}>
@@ -335,11 +397,6 @@ const BestSellersScreen: React.FC = () => {
             </Text>
           </View>
         </View>
-        {/* <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Feather name="share-2" size={wp("5%")} color={Colors.white} />
-          </TouchableOpacity>
-        </View> */}
       </View>
 
       <View style={styles.content}>
@@ -422,6 +479,28 @@ const BestSellersScreen: React.FC = () => {
             <TouchableOpacity
               style={[
                 styles.quickChip,
+                filters.inStockOnly && styles.quickChipActive,
+              ]}
+              onPress={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  inStockOnly: !prev.inStockOnly,
+                }))
+              }
+            >
+              <Text
+                style={[
+                  styles.quickChipText,
+                  filters.inStockOnly && styles.quickChipTextActive,
+                ]}
+              >
+                In Stock
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.quickChip,
                 filters.discountedOnly && styles.quickChipActive,
               ]}
               onPress={() =>
@@ -437,7 +516,7 @@ const BestSellersScreen: React.FC = () => {
                   filters.discountedOnly && styles.quickChipTextActive,
                 ]}
               >
-                Discounted
+                On Sale
               </Text>
             </TouchableOpacity>
 
@@ -502,21 +581,6 @@ const BestSellersScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* ── Hero Banner ── */}
-        {/* <View style={styles.heroBanner}>
-          <MaterialCommunityIcons
-            name="trophy"
-            size={wp("8%")}
-            color="#FFD700"
-          />
-          <View style={styles.heroTextContainer}>
-            <Text style={styles.heroTitle}>Most Loved Products</Text>
-            <Text style={styles.heroSubtitle}>
-              Discover what everyone's buying
-            </Text>
-          </View>
-        </View> */}
-
         {/* ── Product List ── */}
         <FlatList
           data={filteredProducts}
@@ -526,6 +590,13 @@ const BestSellersScreen: React.FC = () => {
           columnWrapperStyle={layout === "grid" ? styles.gridRow : undefined}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.primary}
+            />
+          }
           renderItem={({ item }) => (
             <View
               style={
@@ -534,13 +605,7 @@ const BestSellersScreen: React.FC = () => {
                   : styles.gridCardWrapper
               }
             >
-              <ProductCard
-                product={item}
-                onPress={handleProductPress}
-                onAddToCart={handleAddToCart}
-                onRemoveFromCart={handleRemoveFromCart}
-                quantity={getCartQuantity(item.id)}
-              />
+              <ProductCard product={item} />
             </View>
           )}
           ListEmptyComponent={
@@ -565,9 +630,7 @@ const BestSellersScreen: React.FC = () => {
         />
       </View>
 
-      {/* ─────────────────────────────────────────────────────────────────────
-          SORT MODAL
-      ───────────────────────────────────────────────────────────────────── */}
+      {/* ─── SORT MODAL ─── */}
       <Modal
         visible={showSortModal}
         transparent
@@ -613,9 +676,7 @@ const BestSellersScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* ─────────────────────────────────────────────────────────────────────
-          FILTER MODAL
-      ───────────────────────────────────────────────────────────────────── */}
+      {/* ─── FILTER MODAL ─── */}
       <Modal
         visible={showFilterModal}
         transparent
@@ -638,7 +699,7 @@ const BestSellersScreen: React.FC = () => {
               {/* Categories */}
               <Text style={styles.filterSectionTitle}>Categories</Text>
               <View style={styles.filterChipsContainer}>
-                {CATEGORIES.filter((c) => c.id !== "all").map((category) => (
+                {CATEGORIES.map((category) => (
                   <TouchableOpacity
                     key={category.id}
                     style={[
@@ -693,32 +754,55 @@ const BestSellersScreen: React.FC = () => {
               {/* Tags */}
               <Text style={styles.filterSectionTitle}>Product Tags</Text>
               <View style={styles.filterChipsContainer}>
-                {AVAILABLE_TAGS.filter((t) => t !== "Best Seller").map(
-                  (tag) => (
-                    <TouchableOpacity
-                      key={tag}
+                {AVAILABLE_TAGS.map((tag) => (
+                  <TouchableOpacity
+                    key={tag}
+                    style={[
+                      styles.tagChip,
+                      tempFilters.tags.includes(tag) && styles.tagChipActive,
+                    ]}
+                    onPress={() => toggleTag(tag)}
+                  >
+                    <Text
                       style={[
-                        styles.tagChip,
-                        tempFilters.tags.includes(tag) && styles.tagChipActive,
+                        styles.tagChipText,
+                        tempFilters.tags.includes(tag) &&
+                          styles.tagChipTextActive,
                       ]}
-                      onPress={() => toggleTag(tag)}
                     >
-                      <Text
-                        style={[
-                          styles.tagChipText,
-                          tempFilters.tags.includes(tag) &&
-                            styles.tagChipTextActive,
-                        ]}
-                      >
-                        {tag}
-                      </Text>
-                    </TouchableOpacity>
-                  ),
-                )}
+                      {tag}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              {/* Discount Toggle */}
-              <Text style={styles.filterSectionTitle}>Offers</Text>
+              {/* Toggles */}
+              <Text style={styles.filterSectionTitle}>Availability</Text>
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() =>
+                  setTempFilters((prev) => ({
+                    ...prev,
+                    inStockOnly: !prev.inStockOnly,
+                  }))
+                }
+              >
+                <Text style={styles.toggleLabel}>In Stock Only</Text>
+                <View
+                  style={[
+                    styles.toggle,
+                    tempFilters.inStockOnly && styles.toggleActive,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.toggleKnob,
+                      tempFilters.inStockOnly && styles.toggleKnobActive,
+                    ]}
+                  />
+                </View>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[styles.toggleRow, { borderBottomWidth: 0 }]}
                 onPress={() =>
@@ -762,12 +846,31 @@ const BestSellersScreen: React.FC = () => {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
+  root: { flex: 1, backgroundColor: Colors.background },
+  centerContent: {
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: wp("10%"),
   },
-
-  // ── Gradient Background ──
+  loadingText: {
+    fontSize: wp("3.5%"),
+    color: Colors.textSecondary,
+    marginTop: hp("2%"),
+  },
+  errorText: {
+    fontSize: wp("4%"),
+    color: Colors.textPrimary,
+    marginTop: hp("2%"),
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: hp("3%"),
+    backgroundColor: Colors.primary,
+    paddingHorizontal: wp("8%"),
+    paddingVertical: hp("1.5%"),
+    borderRadius: wp("3%"),
+  },
+  retryText: { fontSize: wp("3.5%"), fontWeight: "700", color: Colors.white },
   gradientBg: {
     position: "absolute",
     top: 0,
@@ -785,8 +888,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 40,
     borderBottomRightRadius: 40,
   },
-
-  // ── Header ──
   header: {
     paddingTop: Platform.OS === "ios" ? hp("6%") : hp("6%"),
     paddingHorizontal: wp("5%"),
@@ -795,11 +896,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   backBtn: {
     width: wp("10%"),
     height: wp("10%"),
@@ -808,11 +905,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("2%"),
-  },
+  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: wp("2%") },
   headerTitle: {
     fontSize: wp("4.8%"),
     fontWeight: "700",
@@ -824,26 +917,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.8)",
     marginTop: hp("0.2%"),
   },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  headerIcon: {
-    width: wp("10%"),
-    height: wp("10%"),
-    borderRadius: wp("5%"),
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // ── Content ──
-  content: {
-    flex: 1,
-    paddingHorizontal: wp("4%"),
-  },
-
-  // ── Search ──
+  content: { flex: 1, paddingHorizontal: wp("4%") },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -865,43 +939,12 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     height: "100%",
   },
-
-  // ── Hero Banner ──
-  heroBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFF8E1",
-    borderRadius: wp("3.5%"),
-    padding: wp("4%"),
-    marginBottom: hp("2%"),
-    borderWidth: 1,
-    borderColor: "#FFD700",
-  },
-  heroTextContainer: {
-    flex: 1,
-    marginLeft: wp("3%"),
-  },
-  heroTitle: {
-    fontSize: wp("4%"),
-    fontWeight: "800",
-    color: "#B8860B",
-  },
-  heroSubtitle: {
-    fontSize: wp("3%"),
-    color: "#DAA520",
-  },
-
-  // ── Filter Bar ──
   filterBar: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: hp("1.5%"),
   },
-  filterScroll: {
-    flex: 1,
-    gap: wp("2%"),
-    paddingRight: wp("2%"),
-  },
+  filterScroll: { flex: 1, gap: wp("2%"), paddingRight: wp("2%") },
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -927,9 +970,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.textPrimary,
   },
-  filterChipTextActive: {
-    color: Colors.white,
-  },
+  filterChipTextActive: { color: Colors.white },
   quickChip: {
     backgroundColor: Colors.white,
     paddingHorizontal: wp("3.5%"),
@@ -947,14 +988,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     borderColor: Colors.primary,
   },
-  quickChipText: {
-    fontSize: wp("3.3%"),
-    color: Colors.textSecondary,
-  },
-  quickChipTextActive: {
-    color: Colors.primary,
-    fontWeight: "600",
-  },
+  quickChipText: { fontSize: wp("3.3%"), color: Colors.textSecondary },
+  quickChipTextActive: { color: Colors.primary, fontWeight: "600" },
   layoutToggle: {
     flexDirection: "row",
     alignItems: "center",
@@ -965,31 +1000,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  layoutBtn: {
-    padding: wp("1.8%"),
-    borderRadius: wp("4%"),
-  },
-  layoutBtnActive: {
-    backgroundColor: Colors.primaryLight,
-  },
-
-  // ── Product List ──
-  listContent: {
-    paddingBottom: hp("3%"),
-  },
-  gridRow: {
-    justifyContent: "space-between",
-  },
-  gridCardWrapper: {
-    width: "48.5%",
-    marginBottom: hp("1%"),
-  },
-  listCardWrapper: {
-    width: "100%",
-    marginBottom: hp("1.2%"),
-  },
-
-  // ── Empty State ──
+  layoutBtn: { padding: wp("1.8%"), borderRadius: wp("4%") },
+  layoutBtnActive: { backgroundColor: Colors.primaryLight },
+  listContent: { paddingBottom: hp("3%") },
+  gridRow: { justifyContent: "space-between" },
+  gridCardWrapper: { width: "48.5%", marginBottom: hp("1%") },
+  listCardWrapper: { width: "100%", marginBottom: hp("1.2%") },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
@@ -1021,8 +1037,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.white,
   },
-
-  // ── Modals ──
   modalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,
@@ -1063,22 +1077,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  sortOptionLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
-  sortOptionText: {
-    fontSize: wp("3.8%"),
-    color: Colors.textPrimary,
-  },
-
-  // Filter Content
-  filterContent: {
-    flex: 1,
-    paddingHorizontal: wp("5%"),
-    paddingTop: hp("2%"),
-  },
+  sortOptionLeft: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
+  sortOptionText: { fontSize: wp("3.8%"), color: Colors.textPrimary },
+  filterContent: { flex: 1, paddingHorizontal: wp("5%"), paddingTop: hp("2%") },
   filterSectionTitle: {
     fontSize: wp("3.8%"),
     fontWeight: "700",
@@ -1105,18 +1106,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     borderColor: Colors.primary,
   },
-  filterChipEmoji: {
-    fontSize: wp("5%"),
-    marginBottom: hp("0.3%"),
-  },
-  filterChipBigText: {
-    fontSize: wp("3%"),
-    color: Colors.textSecondary,
-  },
-  filterChipBigTextActive: {
-    color: Colors.primary,
-    fontWeight: "600",
-  },
+  filterChipEmoji: { fontSize: wp("5%"), marginBottom: hp("0.3%") },
+  filterChipBigText: { fontSize: wp("3%"), color: Colors.textSecondary },
+  filterChipBigTextActive: { color: Colors.primary, fontWeight: "600" },
   priceRangeContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1134,14 +1126,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
-  priceRangeText: {
-    fontSize: wp("3.2%"),
-    color: Colors.textSecondary,
-  },
-  priceRangeTextActive: {
-    color: Colors.white,
-    fontWeight: "600",
-  },
+  priceRangeText: { fontSize: wp("3.2%"), color: Colors.textSecondary },
+  priceRangeTextActive: { color: Colors.white, fontWeight: "600" },
   tagChip: {
     backgroundColor: Colors.surfaceAlt,
     paddingHorizontal: wp("3.5%"),
@@ -1154,14 +1140,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
-  tagChipText: {
-    fontSize: wp("3%"),
-    color: Colors.textSecondary,
-  },
-  tagChipTextActive: {
-    color: Colors.white,
-    fontWeight: "600",
-  },
+  tagChipText: { fontSize: wp("3%"), color: Colors.textSecondary },
+  tagChipTextActive: { color: Colors.white, fontWeight: "600" },
   toggleRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1170,10 +1150,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  toggleLabel: {
-    fontSize: wp("3.5%"),
-    color: Colors.textPrimary,
-  },
+  toggleLabel: { fontSize: wp("3.5%"), color: Colors.textPrimary },
   toggle: {
     width: wp("12%"),
     height: hp("3%"),
@@ -1182,18 +1159,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 2,
   },
-  toggleActive: {
-    backgroundColor: Colors.primary,
-  },
+  toggleActive: { backgroundColor: Colors.primary },
   toggleKnob: {
     width: hp("2.5%"),
     height: hp("2.5%"),
     borderRadius: hp("1.25%"),
     backgroundColor: Colors.white,
   },
-  toggleKnobActive: {
-    alignSelf: "flex-end",
-  },
+  toggleKnobActive: { alignSelf: "flex-end" },
   filterActions: {
     flexDirection: "row",
     alignItems: "center",

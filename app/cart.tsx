@@ -1,4 +1,3 @@
-// app/cart.tsx
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -11,7 +10,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -50,21 +48,20 @@ const CartScreen: React.FC = () => {
   const MIN_ORDER_VALUE = 500;
   const isMinOrderMet = cartTotal >= MIN_ORDER_VALUE;
 
-  // Tab bar height calculation (matching your CustomTabBar)
   const TAB_BAR_HEIGHT = 60;
   const systemNavHeight = insets.bottom;
   const tabBarTotalHeight = TAB_BAR_HEIGHT + systemNavHeight;
 
   const handleApplyCoupon = () => {
     const code = couponCode.trim().toUpperCase();
-    if (code === "WELCOME20") {
-      if (appliedCoupon === "WELCOME20") {
+    if (code === "TECH20" || code === "WELCOME20") {
+      if (appliedCoupon === code) {
         setCouponError("Coupon already applied");
         return;
       }
       const discount = Math.round(cartTotal * 0.2);
       setCouponDiscount(discount);
-      setAppliedCoupon("WELCOME20");
+      setAppliedCoupon(code);
       setCouponError("");
       Alert.alert("Coupon Applied", `₹${discount} discount applied!`);
     } else {
@@ -80,7 +77,6 @@ const CartScreen: React.FC = () => {
   };
 
   const handleCheckout = () => {
-    // Check minimum order value
     if (cartTotal < MIN_ORDER_VALUE) {
       Alert.alert(
         "Minimum Order Required",
@@ -116,7 +112,32 @@ const CartScreen: React.FC = () => {
 
   const tipOptions = [0, 10, 20, 50];
 
-  if (cart.length === 0) {
+  // Get primary image from product images array
+  const getProductImage = (product: any) => {
+    if (product.images && product.images.length > 0) {
+      const primary = product.images.find((img: any) => img.isPrimary);
+      return primary?.url || product.images[0].url;
+    }
+    if (product.imageUrl) return product.imageUrl;
+    return "https://via.placeholder.com/300";
+  };
+
+  // Calculate discount
+  const getDiscount = (product: any) => {
+    if (
+      product.originalPrice > 0 &&
+      product.sellingPrice < product.originalPrice
+    ) {
+      return Math.round(
+        ((product.originalPrice - product.sellingPrice) /
+          product.originalPrice) *
+          100,
+      );
+    }
+    return 0;
+  };
+
+  if (!cart || cart.length === 0) {
     return (
       <View style={styles.root}>
         <StatusBar
@@ -152,10 +173,12 @@ const CartScreen: React.FC = () => {
             color={Colors.textMuted}
           />
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
-          <Text style={styles.emptyText}>Add items to get started</Text>
+          <Text style={styles.emptyText}>
+            Add electronics accessories to get started
+          </Text>
           <TouchableOpacity
             style={styles.shopNowBtn}
-            onPress={() => router.push("/products")}
+            onPress={() => router.push("/")}
           >
             <Text style={styles.shopNowText}>Shop Now</Text>
           </TouchableOpacity>
@@ -215,86 +238,136 @@ const CartScreen: React.FC = () => {
         {/* Cart Items */}
         <View style={styles.cartItemsSection}>
           <Text style={styles.sectionTitle}>Items</Text>
-          {cart.map((item) => (
-            <View key={item.product.id} style={styles.cartItem}>
-              <Image
-                source={{ uri: item.product.images[0] }}
-                style={styles.itemImage}
-              />
+          {cart.map((item) => {
+            const product = item.product;
+            const discount = getDiscount(product);
 
-              <View style={styles.itemDetails}>
-                <Text style={styles.itemBrand}>{item.product.brand}</Text>
-                <Text style={styles.itemName} numberOfLines={2}>
-                  {item.product.name}
-                </Text>
-                <Text style={styles.itemUnit}>
-                  {item.product.weight || item.product.unit}
-                </Text>
+            return (
+              <View key={product.id} style={styles.cartItem}>
+                <Image
+                  source={{ uri: getProductImage(product) }}
+                  style={styles.itemImage}
+                  resizeMode="cover"
+                />
 
-                <View style={styles.itemPriceRow}>
-                  <View>
-                    <View style={styles.priceMain}>
-                      <Text style={styles.priceCurrency}>₹</Text>
-                      <Text style={styles.priceValue}>
-                        {item.product.price}
-                      </Text>
-                    </View>
-                    {item.product.originalPrice &&
-                      item.product.originalPrice > item.product.price && (
+                <View style={styles.itemDetails}>
+                  {product.brand ? (
+                    <Text style={styles.itemBrand}>{product.brand}</Text>
+                  ) : null}
+                  <Text style={styles.itemName} numberOfLines={2}>
+                    {product.name}
+                  </Text>
+
+                  {/* Product info chips */}
+                  <View style={styles.itemInfoRow}>
+                    {product.type && (
+                      <View style={styles.infoChip}>
+                        <Text style={styles.infoChipText}>{product.type}</Text>
+                      </View>
+                    )}
+                    {product.color && (
+                      <View style={styles.infoChip}>
+                        <View
+                          style={[
+                            styles.colorDot,
+                            {
+                              backgroundColor:
+                                product.color.toLowerCase() === "black"
+                                  ? "#000"
+                                  : product.color.toLowerCase() === "white"
+                                    ? "#ddd"
+                                    : product.color.toLowerCase() === "silver"
+                                      ? "#C0C0C0"
+                                      : product.color.toLowerCase() === "gold"
+                                        ? "#FFD700"
+                                        : Colors.primary,
+                            },
+                          ]}
+                        />
+                        <Text style={styles.infoChipText}>{product.color}</Text>
+                      </View>
+                    )}
+                    {product.warranty && product.warranty !== "No Warranty" && (
+                      <View style={styles.infoChip}>
+                        <Feather
+                          name="shield"
+                          size={wp("2.5%")}
+                          color={Colors.success}
+                        />
+                        <Text style={styles.infoChipText}>
+                          {product.warranty}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.itemPriceRow}>
+                    <View>
+                      <View style={styles.priceMain}>
+                        <Text style={styles.priceCurrency}>₹</Text>
+                        <Text style={styles.priceValue}>
+                          {product.sellingPrice}
+                        </Text>
+                      </View>
+                      {discount > 0 && (
                         <Text style={styles.originalPrice}>
-                          ₹{item.product.originalPrice}
+                          ₹{product.originalPrice}
                         </Text>
                       )}
+                    </View>
+                    <Text style={styles.itemSubtotal}>
+                      ₹{product.sellingPrice * item.quantity}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.itemActions}>
+                  <TouchableOpacity
+                    style={styles.removeBtn}
+                    onPress={() => removeFromCart(product.id)}
+                  >
+                    <Feather
+                      name="trash-2"
+                      size={wp("4%")}
+                      color={Colors.error}
+                    />
+                  </TouchableOpacity>
+
+                  <View style={styles.qtyCtrl}>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() =>
+                        updateQuantity(product.id, item.quantity - 1)
+                      }
+                    >
+                      <Feather
+                        name="minus"
+                        size={wp("3.5%")}
+                        color={Colors.primary}
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.qtyValue}>{item.quantity}</Text>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() =>
+                        updateQuantity(product.id, item.quantity + 1)
+                      }
+                    >
+                      <Feather
+                        name="plus"
+                        size={wp("3.5%")}
+                        color={Colors.primary}
+                      />
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
-
-              <View style={styles.itemActions}>
-                <TouchableOpacity
-                  style={styles.removeBtn}
-                  onPress={() => removeFromCart(item.product.id)}
-                >
-                  <Feather
-                    name="trash-2"
-                    size={wp("4%")}
-                    color={Colors.error}
-                  />
-                </TouchableOpacity>
-
-                <View style={styles.qtyCtrl}>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() =>
-                      updateQuantity(item.product.id, item.quantity - 1)
-                    }
-                  >
-                    <Feather
-                      name="minus"
-                      size={wp("3.5%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyValue}>{item.quantity}</Text>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() =>
-                      updateQuantity(item.product.id, item.quantity + 1)
-                    }
-                  >
-                    <Feather
-                      name="plus"
-                      size={wp("3.5%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         {/* Coupon Section */}
-        <View style={styles.couponSection}>
+        {/* <View style={styles.couponSection}>
           <Text style={styles.sectionTitle}>Apply Coupon</Text>
 
           {!appliedCoupon ? (
@@ -322,14 +395,14 @@ const CartScreen: React.FC = () => {
                   <Text style={styles.applyBtnText}>Apply</Text>
                 </TouchableOpacity>
               </View>
-              {couponError && (
+              {couponError ? (
                 <Text style={styles.couponError}>{couponError}</Text>
-              )}
+              ) : null}
               <View style={styles.couponHint}>
                 <Feather name="tag" size={wp("3.5%")} color={Colors.success} />
                 <Text style={styles.couponHintText}>
-                  Use code <Text style={styles.couponCode}>WELCOME20</Text> for
-                  20% off
+                  Use code <Text style={styles.couponCode}>TECH20</Text> for 20%
+                  off
                 </Text>
               </View>
             </>
@@ -353,7 +426,7 @@ const CartScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           )}
-        </View>
+        </View> */}
 
         {/* Bill Details */}
         <View style={styles.billSection}>
@@ -565,8 +638,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.white,
   },
-
-  // Minimum Order Warning
   minOrderWarning: {
     flexDirection: "row",
     alignItems: "center",
@@ -584,7 +655,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#E65100",
   },
-
   sectionTitle: {
     fontSize: wp("4%"),
     fontWeight: "700",
@@ -619,7 +689,7 @@ const styles = StyleSheet.create({
   itemBrand: {
     fontSize: wp("2.5%"),
     fontWeight: "600",
-    color: Colors.textMuted,
+    color: Colors.primary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -629,11 +699,38 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginVertical: hp("0.3%"),
   },
-  itemUnit: {
-    fontSize: wp("2.8%"),
+  itemInfoRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: wp("1.5%"),
+    marginTop: hp("0.3%"),
+    marginBottom: hp("0.5%"),
+  },
+  infoChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("1%"),
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("2%"),
+    paddingVertical: hp("0.2%"),
+    borderRadius: wp("1.5%"),
+  },
+  infoChipText: {
+    fontSize: wp("2.3%"),
     color: Colors.textSecondary,
+    fontWeight: "500",
+  },
+  colorDot: {
+    width: wp("2%"),
+    height: wp("2%"),
+    borderRadius: wp("1%"),
+    borderWidth: 0.5,
+    borderColor: Colors.border,
   },
   itemPriceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
     marginTop: hp("0.8%"),
   },
   priceMain: {
@@ -656,9 +753,15 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textDecorationLine: "line-through",
   },
+  itemSubtotal: {
+    fontSize: wp("3.5%"),
+    fontWeight: "700",
+    color: Colors.textPrimary,
+  },
   itemActions: {
     alignItems: "flex-end",
     justifyContent: "space-between",
+    marginLeft: wp("2%"),
   },
   removeBtn: {
     padding: wp("1%"),
@@ -682,8 +785,6 @@ const styles = StyleSheet.create({
     minWidth: wp("4%"),
     textAlign: "center",
   },
-
-  // Coupon Section
   couponSection: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),
@@ -767,7 +868,6 @@ const styles = StyleSheet.create({
     fontSize: wp("3%"),
     color: Colors.textSecondary,
   },
-
   billSection: {
     backgroundColor: Colors.white,
     borderRadius: wp("3%"),

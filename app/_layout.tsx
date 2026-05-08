@@ -5,9 +5,15 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import { Stack } from "expo-router";
+import * as Notifications from "expo-notifications";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useEffect, useRef, useState } from "react";
 import "react-native-reanimated";
+import {
+  addNotificationResponseReceivedListener,
+  registerForPushNotificationsAsync,
+} from "./services/notifications";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -15,6 +21,71 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
+  const [notification, setNotification] = useState<any>(null);
+
+  // ✅ Fixed: Pass null as initial value
+  const notificationListener = useRef<Notifications.EventSubscription | null>(
+    null,
+  );
+  const responseListener = useRef<Notifications.EventSubscription | null>(null);
+
+  useEffect(() => {
+    // Register for push notifications
+    registerForPushNotificationsAsync();
+
+    // Listen for notifications while app is in foreground
+    notificationListener.current =
+      Notifications.addNotificationReceivedListener((notif) => {
+        console.log("📬 Notification received in foreground:", notif);
+        setNotification(notif);
+      });
+
+    // Handle notification taps
+    responseListener.current = addNotificationResponseReceivedListener(
+      (screen) => {
+        console.log("🧭 Navigating to:", screen);
+        router.push(screen as any);
+      },
+    );
+
+    // Check if app was opened from a notification
+    checkInitialNotification();
+
+    return () => {
+      // ✅ Fixed: Use addNotificationReceivedListener's return value directly
+      Notifications.addNotificationReceivedListener((_notif) => {
+        // This creates a new listener, we need to remove the actual subscription
+      });
+
+      // Clean up properly
+      if (notificationListener.current) {
+        notificationListener.current.remove();
+      }
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
+    };
+  }, []);
+
+  // Check if app was opened from a killed state via notification
+  const checkInitialNotification = async () => {
+    try {
+      const response = await Notifications.getLastNotificationResponseAsync();
+      if (response) {
+        const data = response.notification.request.content.data;
+        console.log("🚀 App opened from notification:", data);
+
+        if (data?.type === "order_status_update" && data?.orderId) {
+          setTimeout(() => {
+            router.push(`/(tabs)/myorders?orderId=${data.orderId}` as any);
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to check initial notification:", error);
+    }
+  };
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
