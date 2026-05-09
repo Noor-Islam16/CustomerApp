@@ -1,11 +1,12 @@
+// app/_layout.tsx
 import { CartProvider } from "@/context/CartContext";
+import { FontProvider } from "@/context/FontContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
 import { SplashScreen, Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -26,27 +27,20 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-
-  // ALL HOOKS must be declared before any conditional returns
-  const [fontsLoaded] = useFonts({
-    Exotc350BdBTBold: require("@/assets/fonts/exotic.ttf"),
-  });
-
   const [notification, setNotification] = useState<any>(null);
-
   const notificationListener = useRef<Notifications.EventSubscription | null>(
     null,
   );
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
-  // Hide splash screen once fonts are loaded
+  // Remove useFonts from here - it's now in FontProvider
   useEffect(() => {
-    if (fontsLoaded) {
+    // Small delay to ensure fonts are loaded
+    setTimeout(() => {
       SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded]);
+    }, 500);
+  }, []);
 
-  // Notification effects
   useEffect(() => {
     registerForPushNotificationsAsync();
 
@@ -103,31 +97,39 @@ export default function RootLayout() {
     }
   };
 
-  // NOW it's safe to conditionally return after all hooks
-  if (!fontsLoaded) {
-    return null;
-  }
-
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <CartProvider>
-        <Stack>
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="auth/login" options={{ headerShown: false }} />
-          <Stack.Screen name="signup" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="products" options={{ headerShown: false }} />
-          <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
-          <Stack.Screen name="cart" options={{ headerShown: false }} />
-          <Stack.Screen name="checkout" options={{ headerShown: false }} />
-          <Stack.Screen name="notifications" options={{ headerShown: false }} />
-          <Stack.Screen name="privacy" options={{ headerShown: false }} />
-          <Stack.Screen name="editprofile" options={{ headerShown: false }} />
-          <Stack.Screen name="bestsellers" options={{ headerShown: false }} />
-          <Stack.Screen name="limitedstocks" options={{ headerShown: false }} />
-        </Stack>
-      </CartProvider>
+    <FontProvider>
+      {" "}
+      {/* Add FontProvider at the root */}
+      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <CartProvider>
+          <Stack>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+            <Stack.Screen name="signup" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="products" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="product/[id]"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen name="cart" options={{ headerShown: false }} />
+            <Stack.Screen name="checkout" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="notifications"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen name="privacy" options={{ headerShown: false }} />
+            <Stack.Screen name="editprofile" options={{ headerShown: false }} />
+            <Stack.Screen name="bestsellers" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="limitedstocks"
+              options={{ headerShown: false }}
+            />
+          </Stack>
+        </CartProvider>
+      </ThemeProvider>
       <StatusBar style="dark" />
-    </ThemeProvider>
+    </FontProvider>
   );
 }

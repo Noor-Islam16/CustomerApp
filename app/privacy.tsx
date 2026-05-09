@@ -1,4 +1,5 @@
 // app/privacy.tsx or screens/PrivacyPolicyScreen.tsx
+import { Text } from "@/components/CustomText";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useRef, useState } from "react";
@@ -12,7 +13,6 @@ import {
   Share,
   StatusBar,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from "react-native";

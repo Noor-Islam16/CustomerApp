@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — app/editprofile.tsx  (full file, replace yours)
 // ─────────────────────────────────────────────────────────────────────────────
+import { Text } from "@/components/CustomText";
 import { Ionicons } from "@expo/vector-icons";
 import Feather from "@expo/vector-icons/Feather";
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
@@ -12,14 +13,12 @@ import {
   Animated,
   Easing,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -29,18 +28,30 @@ import {
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
-import { apiGetMe, apiUpdateProfile } from "./services/api"; 
+import { apiGetMe, apiUpdateProfile } from "./services/api";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const INDIAN_STATES = [
-  "Andhra Pradesh", "Assam", "Bihar", "Delhi", "Gujarat", "Haryana",
-  "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Odisha",
-  "Punjab", "Rajasthan", "Tamil Nadu", "Telangana", "Uttar Pradesh",
+  "Andhra Pradesh",
+  "Assam",
+  "Bihar",
+  "Delhi",
+  "Gujarat",
+  "Haryana",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Tamil Nadu",
+  "Telangana",
+  "Uttar Pradesh",
   "West Bengal",
 ];
 
-const GST_REGEX =
-  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const isGstValid = (gst: string) => GST_REGEX.test(gst.trim().toUpperCase());
 
 // ─── Section Header ───────────────────────────────────────────────────────────
@@ -157,11 +168,17 @@ const DropdownPicker = ({
   return (
     <>
       <TouchableOpacity
-        style={[styles.input, styles.dropdownBtn, value ? styles.inputFilled : undefined]}
+        style={[
+          styles.input,
+          styles.dropdownBtn,
+          value ? styles.inputFilled : undefined,
+        ]}
         onPress={toggleOpen}
         activeOpacity={0.8}
       >
-        <Text style={[styles.dropdownText, !value && { color: Colors.textMuted }]}>
+        <Text
+          style={[styles.dropdownText, !value && { color: Colors.textMuted }]}
+        >
           {value || placeholder}
         </Text>
         <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
@@ -192,11 +209,22 @@ const DropdownPicker = ({
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[styles.optionRow, value === item && styles.optionRowActive]}
-                  onPress={() => { onSelect(item); setOpen(false); }}
+                  style={[
+                    styles.optionRow,
+                    value === item && styles.optionRowActive,
+                  ]}
+                  onPress={() => {
+                    onSelect(item);
+                    setOpen(false);
+                  }}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.optionText, value === item && styles.optionTextActive]}>
+                  <Text
+                    style={[
+                      styles.optionText,
+                      value === item && styles.optionTextActive,
+                    ]}
+                  >
                     {item}
                   </Text>
                   {value === item && (
@@ -281,14 +309,15 @@ const EditProfileScreen = () => {
     }
   }, []);
 
-  useEffect(() => { loadProfile(); }, [loadProfile]);
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   // ── Mark changed helper ───────────────────────────────────────────────────
-  const markChanged =
-    (setter: (v: string) => void) => (v: string) => {
-      setter(v);
-      setHasChanges(true);
-    };
+  const markChanged = (setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setHasChanges(true);
+  };
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -302,13 +331,13 @@ const EditProfileScreen = () => {
     try {
       setSaving(true);
       await apiUpdateProfile({
-        contactName:  contactName.trim(),
+        contactName: contactName.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
-        city:         city.trim(),
-        state:        state.trim(),
-        pincode:      pincode.trim(),
-        gstNumber:    gstNumber.trim().toUpperCase(),
+        city: city.trim(),
+        state: state.trim(),
+        pincode: pincode.trim(),
+        gstNumber: gstNumber.trim().toUpperCase(),
       });
 
       setHasChanges(false);
@@ -318,7 +347,10 @@ const EditProfileScreen = () => {
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (err: any) {
-      Alert.alert("Save Failed", err.message ?? "Something went wrong. Please try again.");
+      Alert.alert(
+        "Save Failed",
+        err.message ?? "Something went wrong. Please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -326,7 +358,10 @@ const EditProfileScreen = () => {
 
   // ── Discard ───────────────────────────────────────────────────────────────
   const handleDiscard = () => {
-    if (!hasChanges) { router.back(); return; }
+    if (!hasChanges) {
+      router.back();
+      return;
+    }
     Alert.alert(
       "Discard Changes?",
       "You have unsaved changes. Are you sure you want to go back?",
@@ -348,7 +383,10 @@ const EditProfileScreen = () => {
   if (pageLoading) {
     return (
       <View style={styles.centerScreen}>
-        <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.background}
+        />
         <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Loading your profile…</Text>
       </View>
@@ -359,7 +397,10 @@ const EditProfileScreen = () => {
   if (loadError) {
     return (
       <View style={styles.centerScreen}>
-        <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.background}
+        />
         <Feather name="wifi-off" size={wp("12%")} color={Colors.error} />
         <Text style={styles.errorTitle}>Couldn't load profile</Text>
         <Text style={styles.errorMessage}>{loadError}</Text>
@@ -392,7 +433,11 @@ const EditProfileScreen = () => {
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <View style={styles.backBtnInner}>
-              <Ionicons name="arrow-back" size={wp("5.5%")} color={Colors.textPrimary} />
+              <Ionicons
+                name="arrow-back"
+                size={wp("5.5%")}
+                color={Colors.textPrimary}
+              />
             </View>
           </TouchableOpacity>
 
@@ -446,9 +491,7 @@ const EditProfileScreen = () => {
           {/* Phone is read-only — pulled from user.phone, never editable */}
           <Field label="Mobile Number">
             <View style={[styles.input, styles.disabledInput]}>
-              <Text style={styles.disabledText}>
-                +91 {phone}
-              </Text>
+              <Text style={styles.disabledText}>+91 {phone}</Text>
               <View style={styles.verifiedBadge}>
                 <Feather name="check-circle" size={13} color={Colors.success} />
                 <Text style={styles.verifiedText}>Verified</Text>
@@ -460,7 +503,13 @@ const EditProfileScreen = () => {
         {/* ── Delivery Address Card ── */}
         <View style={styles.card}>
           <SectionHeader
-            icon={<FontAwesome5 name="map-marker-alt" size={16} color={Colors.primary} />}
+            icon={
+              <FontAwesome5
+                name="map-marker-alt"
+                size={16}
+                color={Colors.primary}
+              />
+            }
             title="Delivery Address"
           />
 
@@ -494,7 +543,10 @@ const EditProfileScreen = () => {
             <View style={{ flex: 1 }}>
               <Field label="City" required>
                 <TextInput
-                  style={[inputStyle("city", city !== ""), { fontSize: wp("3.6%") }]}
+                  style={[
+                    inputStyle("city", city !== ""),
+                    { fontSize: wp("3.6%") },
+                  ]}
                   value={city}
                   onChangeText={markChanged(setCity)}
                   placeholder="e.g. Surat"
@@ -510,14 +562,27 @@ const EditProfileScreen = () => {
             <View style={{ flex: 1 }}>
               <Field label="State" required>
                 <TouchableOpacity
-                  style={[styles.input, styles.dropdownBtn, state ? styles.inputFilled : undefined]}
+                  style={[
+                    styles.input,
+                    styles.dropdownBtn,
+                    state ? styles.inputFilled : undefined,
+                  ]}
                   onPress={() => setShowStateDropdown(true)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.dropdownText, !state && { color: Colors.textMuted }]}>
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      !state && { color: Colors.textMuted },
+                    ]}
+                  >
                     {state || "Select State"}
                   </Text>
-                  <Feather name="chevron-down" size={18} color={Colors.textMuted} />
+                  <Feather
+                    name="chevron-down"
+                    size={18}
+                    color={Colors.textMuted}
+                  />
                 </TouchableOpacity>
               </Field>
             </View>
@@ -527,7 +592,9 @@ const EditProfileScreen = () => {
             <TextInput
               style={inputStyle("pincode", pincode !== "")}
               value={pincode}
-              onChangeText={(t) => markChanged(setPincode)(t.replace(/[^0-9]/g, ""))}
+              onChangeText={(t) =>
+                markChanged(setPincode)(t.replace(/[^0-9]/g, ""))
+              }
               placeholder="e.g. 395003"
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
@@ -542,7 +609,13 @@ const EditProfileScreen = () => {
         {/* ── GST Details Card ── */}
         <View style={styles.card}>
           <SectionHeader
-            icon={<FontAwesome5 name="credit-card" size={16} color={Colors.primary} />}
+            icon={
+              <FontAwesome5
+                name="credit-card"
+                size={16}
+                color={Colors.primary}
+              />
+            }
             title="GST Details"
           />
           <View style={styles.optionalChip}>
@@ -552,7 +625,10 @@ const EditProfileScreen = () => {
           <Field label="GST Number">
             <View>
               <TextInput
-                style={[inputStyle("gstNumber", gstNumber !== ""), styles.gstInput]}
+                style={[
+                  inputStyle("gstNumber", gstNumber !== ""),
+                  styles.gstInput,
+                ]}
                 value={gstNumber}
                 onChangeText={(t) => markChanged(setGstNumber)(t.toUpperCase())}
                 placeholder="e.g. 24AABCU9603R1ZX"
@@ -566,16 +642,41 @@ const EditProfileScreen = () => {
               {gstNumber.length > 0 && (
                 <View style={styles.gstStatusContainer}>
                   {isGstValid(gstNumber) ? (
-                    <View style={[styles.gstStatusChip, { backgroundColor: Colors.success + "20" }]}>
-                      <Feather name="check-circle" size={wp("3%")} color={Colors.success} />
-                      <Text style={[styles.gstStatusText, { color: Colors.success }]}>
+                    <View
+                      style={[
+                        styles.gstStatusChip,
+                        { backgroundColor: Colors.success + "20" },
+                      ]}
+                    >
+                      <Feather
+                        name="check-circle"
+                        size={wp("3%")}
+                        color={Colors.success}
+                      />
+                      <Text
+                        style={[
+                          styles.gstStatusText,
+                          { color: Colors.success },
+                        ]}
+                      >
                         Valid GST
                       </Text>
                     </View>
                   ) : (
-                    <View style={[styles.gstStatusChip, { backgroundColor: Colors.error + "20" }]}>
-                      <Feather name="alert-circle" size={wp("3%")} color={Colors.error} />
-                      <Text style={[styles.gstStatusText, { color: Colors.error }]}>
+                    <View
+                      style={[
+                        styles.gstStatusChip,
+                        { backgroundColor: Colors.error + "20" },
+                      ]}
+                    >
+                      <Feather
+                        name="alert-circle"
+                        size={wp("3%")}
+                        color={Colors.error}
+                      />
+                      <Text
+                        style={[styles.gstStatusText, { color: Colors.error }]}
+                      >
                         Invalid GST
                       </Text>
                     </View>
@@ -667,7 +768,11 @@ const EditProfileScreen = () => {
                     {s}
                   </Text>
                   {state === s && (
-                    <Feather name="check-circle" size={wp("4%")} color={Colors.primary} />
+                    <Feather
+                      name="check-circle"
+                      size={wp("4%")}
+                      color={Colors.primary}
+                    />
                   )}
                 </TouchableOpacity>
               ))}
@@ -776,7 +881,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
     elevation: 0,
   },
-  saveChipText: { fontSize: wp("3.5%"), color: Colors.white, fontWeight: "700" },
+  saveChipText: {
+    fontSize: wp("3.5%"),
+    color: Colors.white,
+    fontWeight: "700",
+  },
   saveChipTextDisabled: { color: Colors.white },
 
   // Card
@@ -803,7 +912,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  optionalChipText: { fontSize: wp("2.8%"), color: Colors.textMuted, fontWeight: "500" },
+  optionalChipText: {
+    fontSize: wp("2.8%"),
+    color: Colors.textMuted,
+    fontWeight: "500",
+  },
 
   // Input
   input: {
@@ -847,7 +960,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  disabledText: { fontSize: wp("3.9%"), color: Colors.textSecondary, fontWeight: "500" },
+  disabledText: {
+    fontSize: wp("3.9%"),
+    color: Colors.textSecondary,
+    fontWeight: "500",
+  },
   verifiedBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -857,10 +974,18 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  verifiedText: { fontSize: wp("3%"), color: Colors.success, fontWeight: "700" },
+  verifiedText: {
+    fontSize: wp("3%"),
+    color: Colors.success,
+    fontWeight: "700",
+  },
 
   // Dropdown trigger
-  dropdownBtn: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  dropdownBtn: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   dropdownText: { fontSize: wp("3.9%"), color: Colors.textPrimary, flex: 1 },
 
   // GST status
@@ -900,8 +1025,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  dropdownTitle: { fontSize: wp("4.5%"), fontWeight: "700", color: Colors.textPrimary },
-  dropdownClose: { fontSize: wp("5%"), color: Colors.textMuted, padding: wp("2%") },
+  dropdownTitle: {
+    fontSize: wp("4.5%"),
+    fontWeight: "700",
+    color: Colors.textPrimary,
+  },
+  dropdownClose: {
+    fontSize: wp("5%"),
+    color: Colors.textMuted,
+    padding: wp("2%"),
+  },
   dropdownSearch: {
     paddingHorizontal: wp("5%"),
     paddingVertical: hp("1.5%"),
@@ -999,7 +1132,11 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 8,
   },
-  submitBtnDisabled: { backgroundColor: Colors.textMuted, shadowOpacity: 0, elevation: 0 },
+  submitBtnDisabled: {
+    backgroundColor: Colors.textMuted,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   submitText: {
     fontSize: wp("4%"),
     color: Colors.white,
@@ -1018,7 +1155,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  discardText: { fontSize: wp("3.8%"), color: Colors.textMuted, fontWeight: "600" },
+  discardText: {
+    fontSize: wp("3.8%"),
+    color: Colors.textMuted,
+    fontWeight: "600",
+  },
 });
 
 export default EditProfileScreen;

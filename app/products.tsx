@@ -1,3 +1,4 @@
+import { Text } from "@/components/CustomText";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -12,7 +13,6 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -23,19 +23,13 @@ import {
 } from "react-native-responsive-screen";
 import ProductCard from "../components/ProductCard";
 import Colors from "../constants/colors";
-import {
-  AVAILABLE_TAGS,
-  CATEGORIES,
-  COMPATIBILITY_OPTIONS,
-  Product,
-  WARRANTY_OPTIONS,
-} from "../constants/products";
+import { CATEGORIES, Product } from "../constants/products";
 import { useCart } from "../context/CartContext";
 import { ApiProduct, fetchAllProducts } from "./services/productApi";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Map API product to app Product format
+// Map API product to app Product format (SIMPLIFIED)
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
   return {
     id: apiProduct._id,
@@ -66,12 +60,7 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
 
 interface FilterState {
   categories: string[];
-  tags: string[];
-  compatibility: string[];
-  priceRange: {
-    min: number;
-    max: number;
-  };
+  priceRange: { min: number; max: number };
   sortBy:
     | "popularity"
     | "price_low"
@@ -81,7 +70,6 @@ interface FilterState {
     | "name_desc";
   inStockOnly: boolean;
   discountedOnly: boolean;
-  warranty: string[];
 }
 
 const SORT_OPTIONS = [
@@ -118,19 +106,15 @@ const AllProductsScreen: React.FC = () => {
 
   const [filters, setFilters] = useState<FilterState>({
     categories: [],
-    tags: [],
-    compatibility: [],
     priceRange: { min: 0, max: Infinity },
     sortBy: "popularity",
     inStockOnly: false,
     discountedOnly: false,
-    warranty: [],
   });
 
   const [tempFilters, setTempFilters] = useState<FilterState>(filters);
   const [activeFilterCount, setActiveFilterCount] = useState(0);
 
-  const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
@@ -140,11 +124,7 @@ const AllProductsScreen: React.FC = () => {
       const apiProducts = await fetchAllProducts();
       const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
       setAllProducts(mappedProducts);
-      console.log(
-        `📦 AllProducts: Loaded ${mappedProducts.length} electronics products`,
-      );
     } catch (err: any) {
-      console.error("❌ Failed to load products:", err);
       setError(err.message || "Failed to load products");
     }
   }, []);
@@ -185,8 +165,7 @@ const AllProductsScreen: React.FC = () => {
           p.name.toLowerCase().includes(query) ||
           p.brand.toLowerCase().includes(query) ||
           p.category.toLowerCase().includes(query) ||
-          p.subCategory.toLowerCase().includes(query) ||
-          p.type.toLowerCase().includes(query),
+          (p.description || "").toLowerCase().includes(query),
       );
     }
 
@@ -197,25 +176,6 @@ const AllProductsScreen: React.FC = () => {
       );
     }
 
-    // Tags
-    if (filters.tags.length > 0) {
-      result = result.filter((p) =>
-        p.tags.some((tag) => filters.tags.includes(tag)),
-      );
-    }
-
-    // Compatibility
-    if (filters.compatibility.length > 0) {
-      result = result.filter((p) =>
-        p.compatibility.some((comp) => filters.compatibility.includes(comp)),
-      );
-    }
-
-    // Warranty
-    if (filters.warranty.length > 0) {
-      result = result.filter((p) => filters.warranty.includes(p.warranty));
-    }
-
     // Price
     result = result.filter(
       (p) =>
@@ -224,16 +184,13 @@ const AllProductsScreen: React.FC = () => {
     );
 
     // In stock
-    if (filters.inStockOnly) {
-      result = result.filter((p) => p.inStock);
-    }
+    if (filters.inStockOnly) result = result.filter((p) => p.inStock);
 
     // Discounted
-    if (filters.discountedOnly) {
+    if (filters.discountedOnly)
       result = result.filter(
         (p) => p.originalPrice > 0 && p.sellingPrice < p.originalPrice,
       );
-    }
 
     // Sort
     switch (filters.sortBy) {
@@ -254,20 +211,16 @@ const AllProductsScreen: React.FC = () => {
         break;
       default:
         result.sort((a, b) => {
-          const aScore = (a.isFastMoving ? 2 : 0) + (a.isFeatured ? 1 : 0);
-          const bScore = (b.isFastMoving ? 2 : 0) + (b.isFeatured ? 1 : 0);
+          const aScore = a.isFeatured ? 1 : 0;
+          const bScore = b.isFeatured ? 1 : 0;
           return bScore - aScore;
         });
     }
 
     setFilteredProducts(result);
 
-    // Count active filters
     let count = 0;
     if (filters.categories.length > 0) count++;
-    if (filters.tags.length > 0) count++;
-    if (filters.compatibility.length > 0) count++;
-    if (filters.warranty.length > 0) count++;
     if (filters.priceRange.min > 0 || filters.priceRange.max < Infinity)
       count++;
     if (filters.inStockOnly) count++;
@@ -280,32 +233,25 @@ const AllProductsScreen: React.FC = () => {
     await loadProducts();
     setRefreshing(false);
   }, [loadProducts]);
-
   const applyFilters = () => {
     setFilters(tempFilters);
     setShowFilterModal(false);
   };
-
   const resetFilters = () => {
     const resetState: FilterState = {
       categories: [],
-      tags: [],
-      compatibility: [],
       priceRange: { min: 0, max: Infinity },
       sortBy: filters.sortBy,
       inStockOnly: false,
       discountedOnly: false,
-      warranty: [],
     };
     setTempFilters(resetState);
     setFilters(resetState);
   };
-
   const clearAllFilters = () => {
     resetFilters();
     setShowFilterModal(false);
   };
-
   const toggleCategory = (categoryId: string) => {
     setTempFilters((prev) => ({
       ...prev,
@@ -314,41 +260,9 @@ const AllProductsScreen: React.FC = () => {
         : [...prev.categories, categoryId],
     }));
   };
-
-  const toggleTag = (tag: string) => {
-    setTempFilters((prev) => ({
-      ...prev,
-      tags: prev.tags.includes(tag)
-        ? prev.tags.filter((t) => t !== tag)
-        : [...prev.tags, tag],
-    }));
-  };
-
-  const toggleCompatibility = (comp: string) => {
-    setTempFilters((prev) => ({
-      ...prev,
-      compatibility: prev.compatibility.includes(comp)
-        ? prev.compatibility.filter((c) => c !== comp)
-        : [...prev.compatibility, comp],
-    }));
-  };
-
-  const toggleWarranty = (warranty: string) => {
-    setTempFilters((prev) => ({
-      ...prev,
-      warranty: prev.warranty.includes(warranty)
-        ? prev.warranty.filter((w) => w !== warranty)
-        : [...prev.warranty, warranty],
-    }));
-  };
-
   const selectPriceRange = (min: number, max: number) => {
-    setTempFilters((prev) => ({
-      ...prev,
-      priceRange: { min, max },
-    }));
+    setTempFilters((prev) => ({ ...prev, priceRange: { min, max } }));
   };
-
   const selectSort = (sortBy: FilterState["sortBy"]) => {
     setFilters((prev) => ({ ...prev, sortBy }));
     setShowSortModal(false);
@@ -375,8 +289,6 @@ const AllProductsScreen: React.FC = () => {
         barStyle="dark-content"
         backgroundColor={Colors.gradientStart}
       />
-
-      {/* Animated Background Gradient */}
       <Animated.View style={[styles.gradientBg, { opacity: fadeAnim }]}>
         <View style={styles.gradientOverlay} />
       </Animated.View>
@@ -422,7 +334,7 @@ const AllProductsScreen: React.FC = () => {
       </View>
 
       <View style={styles.content}>
-        {/* Search Bar */}
+        {/* Search */}
         <Animated.View
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
@@ -468,7 +380,6 @@ const AllProductsScreen: React.FC = () => {
                 color={Colors.primary}
               />
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[
                 styles.filterChip,
@@ -493,8 +404,6 @@ const AllProductsScreen: React.FC = () => {
                 Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
               </Text>
             </TouchableOpacity>
-
-            {/* Quick Filter Chips */}
             <TouchableOpacity
               style={[
                 styles.quickChip,
@@ -516,7 +425,6 @@ const AllProductsScreen: React.FC = () => {
                 In Stock
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[
                 styles.quickChip,
@@ -538,7 +446,6 @@ const AllProductsScreen: React.FC = () => {
                 On Sale
               </Text>
             </TouchableOpacity>
-
             {PRICE_RANGES.slice(0, 3).map((range) => (
               <TouchableOpacity
                 key={range.label}
@@ -568,8 +475,6 @@ const AllProductsScreen: React.FC = () => {
               </TouchableOpacity>
             ))}
           </ScrollView>
-
-          {/* Layout Toggle */}
           <View style={styles.layoutToggle}>
             <TouchableOpacity
               style={[
@@ -630,8 +535,8 @@ const AllProductsScreen: React.FC = () => {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <MaterialCommunityIcons
-                name="package-variant"
-                size={wp("20%")}
+                name="devices"
+                size={wp("15%")}
                 color={Colors.textMuted}
               />
               <Text style={styles.emptyTitle}>No accessories found</Text>
@@ -695,7 +600,7 @@ const AllProductsScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Filter Modal */}
+      {/* Filter Modal - SIMPLIFIED */}
       <Modal
         visible={showFilterModal}
         transparent
@@ -710,7 +615,6 @@ const AllProductsScreen: React.FC = () => {
                 <Feather name="x" size={wp("5%")} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
-
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={styles.filterContent}
@@ -770,86 +674,7 @@ const AllProductsScreen: React.FC = () => {
                 ))}
               </View>
 
-              {/* Compatibility */}
-              <Text style={styles.filterSectionTitle}>Compatible With</Text>
-              <View style={styles.filterChipsContainer}>
-                {COMPATIBILITY_OPTIONS.map((comp) => (
-                  <TouchableOpacity
-                    key={comp}
-                    style={[
-                      styles.tagChip,
-                      tempFilters.compatibility.includes(comp) &&
-                        styles.tagChipActive,
-                    ]}
-                    onPress={() => toggleCompatibility(comp)}
-                  >
-                    <Text
-                      style={[
-                        styles.tagChipText,
-                        tempFilters.compatibility.includes(comp) &&
-                          styles.tagChipTextActive,
-                      ]}
-                    >
-                      {comp}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Warranty */}
-              <Text style={styles.filterSectionTitle}>Warranty</Text>
-              <View style={styles.filterChipsContainer}>
-                {WARRANTY_OPTIONS.filter((w) => w !== "No Warranty").map(
-                  (warranty) => (
-                    <TouchableOpacity
-                      key={warranty}
-                      style={[
-                        styles.tagChip,
-                        tempFilters.warranty.includes(warranty) &&
-                          styles.tagChipActive,
-                      ]}
-                      onPress={() => toggleWarranty(warranty)}
-                    >
-                      <Text
-                        style={[
-                          styles.tagChipText,
-                          tempFilters.warranty.includes(warranty) &&
-                            styles.tagChipTextActive,
-                        ]}
-                      >
-                        {warranty}
-                      </Text>
-                    </TouchableOpacity>
-                  ),
-                )}
-              </View>
-
-              {/* Tags */}
-              <Text style={styles.filterSectionTitle}>Product Tags</Text>
-              <View style={styles.filterChipsContainer}>
-                {AVAILABLE_TAGS.map((tag) => (
-                  <TouchableOpacity
-                    key={tag}
-                    style={[
-                      styles.tagChip,
-                      tempFilters.tags.includes(tag) && styles.tagChipActive,
-                    ]}
-                    onPress={() => toggleTag(tag)}
-                  >
-                    <Text
-                      style={[
-                        styles.tagChipText,
-                        tempFilters.tags.includes(tag) &&
-                          styles.tagChipTextActive,
-                      ]}
-                    >
-                      {tag}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Stock Toggle */}
+              {/* Availability */}
               <Text style={styles.filterSectionTitle}>Availability</Text>
               <TouchableOpacity
                 style={styles.toggleRow}
@@ -875,7 +700,6 @@ const AllProductsScreen: React.FC = () => {
                   />
                 </View>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.toggleRow, { borderBottomWidth: 0 }]}
                 onPress={() =>
@@ -901,7 +725,6 @@ const AllProductsScreen: React.FC = () => {
                 </View>
               </TouchableOpacity>
             </ScrollView>
-
             <View style={styles.filterActions}>
               <TouchableOpacity style={styles.clearBtn} onPress={resetFilters}>
                 <Text style={styles.clearBtnText}>Clear All</Text>
@@ -1060,11 +883,6 @@ const styles = StyleSheet.create({
     borderRadius: wp("5%"),
     borderWidth: 1,
     borderColor: Colors.border,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
   },
   quickChipActive: {
     backgroundColor: Colors.primaryLight,
@@ -1210,20 +1028,6 @@ const styles = StyleSheet.create({
   },
   priceRangeText: { fontSize: wp("3.2%"), color: Colors.textSecondary },
   priceRangeTextActive: { color: Colors.white, fontWeight: "600" },
-  tagChip: {
-    backgroundColor: Colors.surfaceAlt,
-    paddingHorizontal: wp("3.5%"),
-    paddingVertical: hp("0.9%"),
-    borderRadius: wp("5%"),
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  tagChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  tagChipText: { fontSize: wp("3%"), color: Colors.textSecondary },
-  tagChipTextActive: { color: Colors.white, fontWeight: "600" },
   toggleRow: {
     flexDirection: "row",
     alignItems: "center",

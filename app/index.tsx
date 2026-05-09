@@ -1,3 +1,4 @@
+import { Text } from "@/components/CustomText";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { router } from "expo-router";
@@ -13,7 +14,6 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -604,7 +604,7 @@ const LoginScreen: React.FC = () => {
             {screen === "phone" && (
               <>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>Welcome Back</Text>
+                  <Text style={[styles.cardTitle]}>Welcome Back</Text>
                   <Text style={styles.cardSubtitle}>
                     Sign in to continue to your account
                   </Text>
@@ -1604,6 +1604,7 @@ const styles = StyleSheet.create({
   },
   cardHeader: { marginBottom: hp("2.5%") },
   cardTitle: {
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
     fontSize: wp("6%"),
     fontWeight: "800",
     color: Colors.textPrimary,
@@ -1614,7 +1615,11 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: wp("5.5%"),
   },
-  phoneHighlight: { fontWeight: "700", color: Colors.primary },
+  phoneHighlight: {
+    fontWeight: "700",
+    color: Colors.primary,
+    fontFamily: "Exotc350BdBTBold",
+  },
 
   inputSection: { marginBottom: hp("2%") },
   inputLabel: {
@@ -1653,6 +1658,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   inputError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
 
@@ -1674,6 +1680,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     textAlign: "center",
     elevation: 2,
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   otpBoxFilled: {
     borderColor: Colors.primary,
@@ -1715,6 +1722,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.textOnPrimary,
     letterSpacing: 0.5,
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
 
   legalNote: {
@@ -1770,6 +1778,7 @@ const styles = StyleSheet.create({
     fontSize: wp("3.8%"),
     color: Colors.textPrimary,
     fontWeight: "500",
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   fieldErrorText: {
     fontSize: wp("3%"),
@@ -1918,6 +1927,7 @@ const styles = StyleSheet.create({
     paddingVertical: hp("1.4%"),
     fontSize: wp("3.8%"),
     color: Colors.textPrimary,
+    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   dropdownList: { paddingHorizontal: wp("5%"), paddingVertical: hp("1%") },
   dropdownItem: {
