@@ -1,3 +1,4 @@
+import { Text } from "@/components/CustomText";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { router } from "expo-router";
@@ -13,7 +14,6 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -576,12 +576,12 @@ const LoginScreen: React.FC = () => {
           >
             <View style={styles.logoContainer}>
               <Image
-                source={require("../../assets/images/logo.jpeg")}
+                source={require("../../assets/images/logo.png")}
                 style={styles.logoImage}
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.appName}>JholeSaler</Text>
+            {/* <Text style={styles.appName}>Thump Beyond Limits</Text> */}
             <Text style={styles.tagline}>
               Electronic Accessories In Your Way.
             </Text>
@@ -1361,7 +1361,7 @@ const LoginScreen: React.FC = () => {
             )}
           </Animated.View>
 
-          <Text style={styles.footer}>JholeSaler © 2026</Text>
+          <Text style={styles.footer}>Thump Beyond Limits ©2026</Text>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1583,6 +1583,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   tagline: {
+    fontFamily: "Exotc350BdBTBold",
     fontSize: wp("3.6%"),
     color: "rgba(255,255,255,0.9)",
     marginTop: hp("0.5%"),

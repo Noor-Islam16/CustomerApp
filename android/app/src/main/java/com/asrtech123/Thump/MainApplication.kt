@@ -1,4 +1,4 @@
-package com.asrtech123.JholeSaler
+package com.asrtech123.Thump
 
 import android.app.Application
 import android.content.res.Configuration

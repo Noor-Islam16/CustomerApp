@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const BASE_URL = "https://customer-7bcb.onrender.com";
+// export const BASE_URL = "http://10.64.32.75:5000";
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 export const saveToken = async (token: string) => {
@@ -392,6 +393,42 @@ export const apiGetProductById = async (
 ): Promise<{ success: boolean; data: ApiProduct }> => {
   return apiFetch(`/api/products/${productId}`);
 };
+
+// ─── Notifications API ─────────────────────────────────────────────────────
+
+export interface ApiNotification {
+  _id: string;
+  user: string;
+  type: "approval_status" | "order_status" | "manual_broadcast" | "system";
+  title: string;
+  body: string;
+  isRead: boolean;
+  data?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const apiGetNotifications = (params?: {
+  page?: number;
+  limit?: number;
+}) => {
+  const query = new URLSearchParams();
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit || "50"));
+  return apiFetch(`/api/notifications?${query.toString()}`, {}, true);
+};
+
+export const apiMarkNotificationRead = (id: string) =>
+  apiFetch(`/api/notifications/${id}/read`, { method: "PATCH" }, true);
+
+export const apiMarkAllNotificationsRead = () =>
+  apiFetch("/api/notifications/mark-all-read", { method: "PATCH" }, true);
+
+export const apiDeleteNotification = (id: string) =>
+  apiFetch(`/api/notifications/${id}`, { method: "DELETE" }, true);
+
+export const apiClearAllNotifications = () =>
+  apiFetch("/api/notifications/clear-all", { method: "DELETE" }, true);
 
 // ─── Categories (static fallback) ─────────────────────────────────────────────
 

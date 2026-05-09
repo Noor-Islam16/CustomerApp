@@ -1,9 +1,11 @@
-// app/notifications.tsx or screens/NotificationScreen.tsx
+// app/notifications.tsx
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import React, { useRef, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   FlatList,
@@ -20,143 +22,91 @@ import {
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
 
-// ─── Notification Types ───────────────────────────────────────────────────────
-type NotifType =
-  | "order_shipped"
-  | "order_delivered"
-  | "order_placed"
-  | "offer"
-  | "reminder"
-  | "restock"
-  | "system"
-  | "review";
+// ─── API Base URL (same as your api.ts) ──────────────────────────────────────
+export const BASE_URL = "https://customer-7bcb.onrender.com";
+// export const BASE_URL = "http://10.64.32.75:5000";
 
-interface Notification {
-  id: string;
-  type: NotifType;
+// ─── Notification Types ──────────────────────────────────────────────────────
+export interface ApiNotification {
+  _id: string;
+  user: string;
+  type: "approval_status" | "order_status" | "manual_broadcast" | "system";
   title: string;
   body: string;
-  time: string;
-  date: string;
   isRead: boolean;
-  meta?: string;
-  actionLabel?: string;
+  data?: any;
+  createdAt: string;
+  updatedAt: string;
 }
 
-// ─── Ecommerce Notification Data ─────────────────────────────────────────────
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  // TODAY
-  {
-    id: "1",
-    type: "order_shipped",
-    title: "Your order is on its way!",
-    body: "Order #NM20481 has been dispatched. Premium Basmati Rice & 3 more items are headed to you.",
-    time: "Just now",
-    date: "Today",
-    isRead: false,
-    meta: "#NM20481",
-    actionLabel: "Track Order",
-  },
-  {
-    id: "2",
-    type: "offer",
-    title: "Flash Sale — 30% OFF ends tonight",
-    body: "Surf Excel Matic, Tata Tea Gold & top household items at unbeatable prices. Use code FLASH30.",
-    time: "20 min ago",
-    date: "Today",
-    isRead: false,
-    meta: "FLASH30",
-    actionLabel: "Shop Now",
-  },
-  {
-    id: "3",
-    type: "restock",
-    title: "Back in stock — Real Fruit Juice",
-    body: "You were waiting for this! Real Mixed Fruit Juice 1ltr is available again. Limited units only.",
-    time: "1 hr ago",
-    date: "Today",
-    isRead: false,
-    meta: "Real Fruit Juice",
-    actionLabel: "Add to Cart",
-  },
-  {
-    id: "4",
-    type: "reminder",
-    title: "Items left in your cart",
-    body: "Nivea Body Lotion & Colgate Toothpaste are waiting. Complete your order before stock runs out.",
-    time: "3 hrs ago",
-    date: "Today",
-    isRead: true,
-    actionLabel: "View Cart",
-  },
-  // YESTERDAY
-  {
-    id: "5",
-    type: "order_delivered",
-    title: "Order delivered successfully!",
-    body: "Order #NM20460 — Aashirvaad Atta 5kg & Tata Tea Gold — has been delivered. How was your experience?",
-    time: "11:20 AM",
-    date: "Yesterday",
-    isRead: true,
-    meta: "#NM20460",
-    actionLabel: "Rate Order",
-  },
-  {
-    id: "6",
-    type: "offer",
-    title: "Members-only: Extra 10% off",
-    body: "As a valued member, get an extra 10% off on orders above ₹499. Valid only for the next 24 hours.",
-    time: "09:00 AM",
-    date: "Yesterday",
-    isRead: true,
-    meta: "MEMBER10",
-    actionLabel: "Claim Offer",
-  },
-  {
-    id: "7",
-    type: "review",
-    title: "Share your review for Cadbury Dairy Milk",
-    body: "You purchased Cadbury Dairy Milk 52g. Your review helps thousands of shoppers make better choices.",
-    time: "08:15 AM",
-    date: "Yesterday",
-    isRead: true,
-    actionLabel: "Write Review",
-  },
-  // EARLIER
-  {
-    id: "8",
-    type: "order_placed",
-    title: "Order confirmed!",
-    body: "Your order #NM20460 for ₹850 has been placed. Expected delivery in 2–3 business days.",
-    time: "Jun 10",
-    date: "Earlier",
-    isRead: true,
-    meta: "#NM20460",
-  },
-  {
-    id: "9",
-    type: "restock",
-    title: "Limited Stock Alert — Haldiram's Bhujia",
-    body: "Haldiram's Bhujia 200g has only 15 units left. You've bought this before — grab it now!",
-    time: "Jun 9",
-    date: "Earlier",
-    isRead: true,
-    actionLabel: "Buy Now",
-  },
-  {
-    id: "10",
-    type: "system",
-    title: "Address verified successfully",
-    body: "Your delivery address in Kolkata has been verified and saved. Future orders will be delivered here.",
-    time: "Jun 8",
-    date: "Earlier",
-    isRead: true,
-  },
-];
+// ─── Direct API Functions (bypassing apiFetch for debugging) ──────────────────
+const getAuthToken = async (): Promise<string | null> => {
+  return AsyncStorage.getItem("auth_token");
+};
+
+const notificationsApiFetch = async (
+  path: string,
+  options: RequestInit = {},
+) => {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers as Record<string, string>),
+  };
+
+  const url = `${BASE_URL}${path}`;
+  console.log(`📡 [Notifications] ${options.method || "GET"} ${url}`);
+  console.log(`🔑 Token present: ${!!token}`);
+
+  const res = await fetch(url, { ...options, headers });
+  const data = await res.json();
+
+  console.log(`📬 [Notifications] Status: ${res.status}`);
+  console.log(
+    `📬 [Notifications] Response:`,
+    JSON.stringify(data).substring(0, 300),
+  );
+
+  if (!res.ok) {
+    throw new Error(data.message || "Request failed");
+  }
+
+  return data;
+};
+
+const fetchNotificationsFromAPI = async () => {
+  const data = await notificationsApiFetch("/api/notifications?limit=50");
+  return data;
+};
+
+const markNotificationRead = async (id: string) => {
+  return notificationsApiFetch(`/api/notifications/${id}/read`, {
+    method: "PATCH",
+  });
+};
+
+const markAllNotificationsRead = async () => {
+  return notificationsApiFetch("/api/notifications/mark-all-read", {
+    method: "PATCH",
+  });
+};
+
+const deleteNotification = async (id: string) => {
+  return notificationsApiFetch(`/api/notifications/${id}`, {
+    method: "DELETE",
+  });
+};
+
+const clearAllNotifications = async () => {
+  return notificationsApiFetch("/api/notifications/clear-all", {
+    method: "DELETE",
+  });
+};
 
 // ─── Icon & Color Config per Type ─────────────────────────────────────────────
 const NOTIF_CONFIG: Record<
-  NotifType,
+  string,
   {
     icon: string;
     color: string;
@@ -165,62 +115,76 @@ const NOTIF_CONFIG: Record<
     gradientEnd: string;
   }
 > = {
-  order_shipped: {
-    icon: "truck",
+  approval_status: {
+    icon: "shield",
     color: Colors.primary,
     bg: Colors.primaryLight,
     gradientStart: Colors.primary,
     gradientEnd: Colors.primaryDark,
   },
-  order_delivered: {
-    icon: "check-circle",
-    color: Colors.success,
-    bg: "#ECFDF5",
-    gradientStart: Colors.success,
+  order_status: {
+    icon: "truck",
+    color: "#00A884",
+    bg: "#E8F5E9",
+    gradientStart: "#00A884",
     gradientEnd: "#4ADE80",
   },
-  order_placed: {
-    icon: "shopping-bag",
+  manual_broadcast: {
+    icon: "bell",
     color: "#8B5CF6",
     bg: "#F5F3FF",
     gradientStart: "#8B5CF6",
     gradientEnd: "#A78BFA",
   },
-  offer: {
-    icon: "tag",
-    color: Colors.warning,
-    bg: "#FFFBEB",
-    gradientStart: Colors.warning,
-    gradientEnd: "#FCD34D",
-  },
-  reminder: {
-    icon: "shopping-cart",
-    color: Colors.error,
-    bg: "#FEF2F2",
-    gradientStart: Colors.error,
-    gradientEnd: "#F87171",
-  },
-  restock: {
-    icon: "refresh-cw",
-    color: Colors.info,
-    bg: "#ECFEFF",
-    gradientStart: Colors.info,
-    gradientEnd: "#22D3EE",
-  },
   system: {
-    icon: "shield",
+    icon: "info",
     color: Colors.textMuted,
     bg: Colors.surfaceAlt,
     gradientStart: Colors.textMuted,
     gradientEnd: Colors.textSecondary,
   },
-  review: {
-    icon: "star",
-    color: Colors.warning,
-    bg: "#FFF7ED",
-    gradientStart: Colors.warning,
-    gradientEnd: "#FB923C",
-  },
+};
+
+// ─── Filter Tabs ──────────────────────────────────────────────────────────────
+type FilterTab =
+  | "all"
+  | "approval_status"
+  | "order_status"
+  | "manual_broadcast";
+const FILTER_TABS: { key: FilterTab; label: string; icon: string }[] = [
+  { key: "all", label: "All", icon: "inbox" },
+  { key: "approval_status", label: "Approval", icon: "shield" },
+  { key: "order_status", label: "Orders", icon: "package" },
+  { key: "manual_broadcast", label: "Alerts", icon: "bell" },
+];
+
+const filterNotifications = (notifs: ApiNotification[], tab: FilterTab) => {
+  if (tab === "all") return notifs;
+  return notifs.filter((n) => n.type === tab);
+};
+
+// ─── Time formatter ─────────────────────────────────────────────────────────
+const formatTime = (dateStr: string): { time: string; date: string } => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diff / 60000);
+  const diffHrs = Math.floor(diff / 3600000);
+  const diffDays = Math.floor(diff / 86400000);
+
+  if (diffMins < 1) return { time: "Just now", date: "Today" };
+  if (diffMins < 60) return { time: `${diffMins} min ago`, date: "Today" };
+  if (diffHrs < 24)
+    return {
+      time: `${diffHrs} hr${diffHrs > 1 ? "s" : ""} ago`,
+      date: "Today",
+    };
+  if (diffDays === 1) return { time: "Yesterday", date: "Yesterday" };
+  if (diffDays < 7) return { time: `${diffDays} days ago`, date: "Earlier" };
+  return {
+    time: date.toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+    date: "Earlier",
+  };
 };
 
 // ─── Animated Notification Card ───────────────────────────────────────────────
@@ -228,15 +192,14 @@ const NotifCard = ({
   item,
   onPress,
   onDelete,
-  index,
 }: {
-  item: Notification;
+  item: ApiNotification;
   onPress: (id: string) => void;
   onDelete: (id: string) => void;
-  index: number;
 }) => {
-  const cfg = NOTIF_CONFIG[item.type];
+  const cfg = NOTIF_CONFIG[item.type] || NOTIF_CONFIG.system;
   const scale = useRef(new Animated.Value(1)).current;
+  const { time } = formatTime(item.createdAt);
 
   const handlePressIn = () =>
     Animated.spring(scale, {
@@ -258,20 +221,17 @@ const NotifCard = ({
       <TouchableOpacity
         style={[styles.notifCard, !item.isRead && styles.notifCardUnread]}
         activeOpacity={1}
-        onPress={() => onPress(item.id)}
+        onPress={() => onPress(item._id)}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        {/* Unread accent bar */}
         {!item.isRead && (
           <LinearGradient
             colors={[cfg.gradientStart, cfg.gradientEnd]}
             style={styles.unreadBar}
           />
         )}
-
         <View style={styles.cardInner}>
-          {/* Icon */}
           <View style={styles.iconCol}>
             <LinearGradient
               colors={[cfg.gradientStart, cfg.gradientEnd]}
@@ -287,8 +247,6 @@ const NotifCard = ({
               />
             )}
           </View>
-
-          {/* Content */}
           <View style={styles.notifContent}>
             <View style={styles.notifTopRow}>
               <Text
@@ -300,47 +258,16 @@ const NotifCard = ({
               >
                 {item.title}
               </Text>
-              <Text style={styles.notifTime}>{item.time}</Text>
+              <Text style={styles.notifTime}>{time}</Text>
             </View>
-
             <Text style={styles.notifBody} numberOfLines={2}>
               {item.body}
             </Text>
-
-            {/* Meta chip + Action */}
-            {(item.meta || item.actionLabel) && (
-              <View style={styles.metaRow}>
-                {item.meta && (
-                  <View style={[styles.metaChip, { backgroundColor: cfg.bg }]}>
-                    <Text style={[styles.metaChipText, { color: cfg.color }]}>
-                      {item.meta}
-                    </Text>
-                  </View>
-                )}
-                {item.actionLabel && (
-                  <TouchableOpacity
-                    style={styles.actionPill}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.actionPillText, { color: cfg.color }]}>
-                      {item.actionLabel}
-                    </Text>
-                    <Feather
-                      name="arrow-right"
-                      size={wp("2.8%")}
-                      color={cfg.color}
-                    />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
           </View>
         </View>
-
-        {/* Delete */}
         <TouchableOpacity
           style={styles.deleteBtn}
-          onPress={() => onDelete(item.id)}
+          onPress={() => onDelete(item._id)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Feather name="x" size={wp("3.5%")} color={Colors.textMuted} />
@@ -370,54 +297,72 @@ const EmptyState = () => (
       <Feather name="bell-off" size={wp("10%")} color={Colors.primary} />
     </LinearGradient>
     <Text style={styles.emptyTitle}>All caught up!</Text>
-    <Text style={styles.emptySub}>
-      No new notifications right now.{"\n"}We'll ping you when something
-      arrives.
-    </Text>
+    <Text style={styles.emptySub}>No new notifications right now.</Text>
   </View>
 );
 
-// ─── Filter Tabs ──────────────────────────────────────────────────────────────
-type FilterTab = "all" | "orders" | "offers" | "alerts";
-const FILTER_TABS: { key: FilterTab; label: string; icon: string }[] = [
-  { key: "all", label: "All", icon: "inbox" },
-  { key: "orders", label: "Orders", icon: "package" },
-  { key: "offers", label: "Offers", icon: "tag" },
-  { key: "alerts", label: "Alerts", icon: "bell" },
-];
-
-const filterNotifications = (notifs: Notification[], tab: FilterTab) => {
-  if (tab === "all") return notifs;
-  if (tab === "orders")
-    return notifs.filter((n) =>
-      ["order_shipped", "order_delivered", "order_placed"].includes(n.type),
-    );
-  if (tab === "offers") return notifs.filter((n) => n.type === "offer");
-  if (tab === "alerts")
-    return notifs.filter((n) =>
-      ["reminder", "restock", "review", "system"].includes(n.type),
-    );
-  return notifs;
-};
-
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-const NotificationScreen = ({ navigation }: { navigation?: any }) => {
-  const [notifications, setNotifications] = useState<Notification[]>(
-    INITIAL_NOTIFICATIONS,
-  );
+const NotificationScreen = () => {
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      setLoading(true);
+      console.log("📡 Fetching notifications...");
+
+      const res = await fetchNotificationsFromAPI();
+      console.log("📬 Full response:", JSON.stringify(res, null, 2));
+
+      if (res.success && res.data) {
+        const notifs = res.data.notifications || [];
+        console.log(`✅ Loaded ${notifs.length} notifications`);
+        if (notifs.length > 0) {
+          console.log(
+            "📋 First notification:",
+            JSON.stringify(notifs[0], null, 2),
+          );
+        }
+        setNotifications(notifs);
+      } else {
+        console.warn("⚠️ Unexpected response format:", res);
+        setNotifications([]);
+      }
+    } catch (error: any) {
+      console.error(
+        "❌ Failed to fetch notifications:",
+        error?.message || error,
+      );
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotifications();
+    }, [fetchNotifications]),
+  );
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
   const filtered = filterNotifications(notifications, activeTab);
 
-  const handleMarkRead = (id: string) => {
+  const handleMarkRead = async (id: string) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+      prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)),
     );
+    try {
+      await markNotificationRead(id);
+    } catch {}
   };
 
-  const handleDelete = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const handleDelete = async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n._id !== id));
+    try {
+      await deleteNotification(id);
+    } catch {}
   };
 
   const handleClearAll = () => {
@@ -426,31 +371,61 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
       {
         text: "Clear",
         style: "destructive",
-        onPress: () => setNotifications([]),
+        onPress: async () => {
+          setNotifications([]);
+          try {
+            await clearAllNotifications();
+          } catch {}
+        },
       },
     ]);
   };
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    try {
+      await markAllNotificationsRead();
+    } catch {}
   };
 
   // Group by date
   const dateOrder = ["Today", "Yesterday", "Earlier"];
   const listData: (
     | { type: "header"; label: string; count: number }
-    | { type: "item"; item: Notification; index: number }
+    | { type: "item"; item: ApiNotification }
   )[] = [];
-  let globalIdx = 0;
+
   dateOrder.forEach((label) => {
-    const group = filtered.filter((n) => n.date === label);
+    const group = filtered.filter(
+      (n) => formatTime(n.createdAt).date === label,
+    );
     if (group.length > 0) {
       listData.push({ type: "header", label, count: group.length });
       group.forEach((item) => {
-        listData.push({ type: "item", item, index: globalIdx++ });
+        listData.push({ type: "item", item });
       });
     }
   });
+
+  if (loading) {
+    return (
+      <View
+        style={[
+          styles.root,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={Colors.gradientStart}
+        />
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: hp("2%"), color: Colors.textSecondary }}>
+          Loading notifications...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -466,11 +441,9 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        {/* Decorative circle */}
         <View style={styles.headerDecorCircle} />
         <View style={styles.headerDecorCircle2} />
 
-        {/* Top Row */}
         <View style={styles.headerTop}>
           <TouchableOpacity
             style={styles.backBtn}
@@ -479,7 +452,6 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
           >
             <Feather name="arrow-left" size={wp("5.5%")} color={Colors.white} />
           </TouchableOpacity>
-
           <View style={styles.headerTitleBlock}>
             <Text style={styles.headerTitle}>Notifications</Text>
             {unreadCount > 0 && (
@@ -488,7 +460,6 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
               </View>
             )}
           </View>
-
           {notifications.length > 0 && (
             <TouchableOpacity
               style={styles.clearAllBtn}
@@ -504,12 +475,9 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
           )}
         </View>
 
-        {/* Mark all + subtitle */}
         <View style={styles.headerMeta}>
           <Text style={styles.headerSubtitle}>
-            {unreadCount > 0
-              ? `${unreadCount} unread notification${unreadCount > 1 ? "s" : ""}`
-              : "You're all caught up"}
+            {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up"}
           </Text>
           {unreadCount > 0 && (
             <TouchableOpacity
@@ -527,7 +495,6 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
           )}
         </View>
 
-        {/* Filter Tabs */}
         <View style={styles.filterTabsRow}>
           {FILTER_TABS.map((tab) => {
             const isActive = activeTab === tab.key;
@@ -581,18 +548,16 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
         <FlatList
           data={listData}
           keyExtractor={(item, index) =>
-            item.type === "header" ? `h-${item.label}` : item.item.id
+            item.type === "header" ? `h-${item.label}` : item.item._id
           }
           renderItem={({ item }) => {
-            if (item.type === "header") {
+            if (item.type === "header")
               return <SectionLabel label={item.label} count={item.count} />;
-            }
             return (
               <NotifCard
                 item={item.item}
                 onPress={handleMarkRead}
                 onDelete={handleDelete}
-                index={item.index}
               />
             );
           }}
@@ -606,12 +571,7 @@ const NotificationScreen = ({ navigation }: { navigation?: any }) => {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  // ── Header ──
+  root: { flex: 1, backgroundColor: Colors.background },
   header: {
     paddingTop: Platform.OS === "ios" ? hp("6%") : hp("5.5%"),
     paddingBottom: hp("1.5%"),
@@ -672,11 +632,6 @@ const styles = StyleSheet.create({
     borderRadius: wp("3%"),
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.error,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 4,
   },
   headerBadgeText: {
     fontSize: wp("2.8%"),
@@ -717,8 +672,6 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.9)",
     fontWeight: "600",
   },
-
-  // ── Filter Tabs ──
   filterTabsRow: {
     flexDirection: "row",
     backgroundColor: "rgba(255,255,255,0.12)",
@@ -735,49 +688,31 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.9%"),
     borderRadius: wp("2.5%"),
   },
-  filterTabActive: {
-    backgroundColor: Colors.white,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
+  filterTabActive: { backgroundColor: Colors.white },
   filterTabText: {
     fontSize: wp("3%"),
     color: "rgba(255,255,255,0.75)",
     fontWeight: "600",
   },
-  filterTabTextActive: {
-    color: Colors.primary,
-    fontWeight: "800",
-  },
+  filterTabTextActive: { color: Colors.primary, fontWeight: "800" },
   tabBadge: {
     backgroundColor: "rgba(255,255,255,0.25)",
     borderRadius: wp("2%"),
     paddingHorizontal: wp("1.5%"),
     paddingVertical: hp("0.1%"),
   },
-  tabBadgeActive: {
-    backgroundColor: Colors.error,
-  },
+  tabBadgeActive: { backgroundColor: Colors.error },
   tabBadgeText: {
     fontSize: wp("2.4%"),
     color: "rgba(255,255,255,0.9)",
     fontWeight: "700",
   },
-  tabBadgeTextActive: {
-    color: Colors.white,
-  },
-
-  // ── List ──
+  tabBadgeTextActive: { color: Colors.white },
   listContent: {
     paddingTop: hp("2%"),
     paddingBottom: hp("12%"),
     paddingHorizontal: wp("4%"),
   },
-
-  // ── Section Label ──
   sectionLabel: {
     flexDirection: "row",
     alignItems: "center",
@@ -804,8 +739,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.textMuted,
   },
-
-  // ── Notification Card ──
   notifCard: {
     backgroundColor: Colors.surface,
     borderRadius: wp("4.5%"),
@@ -839,8 +772,6 @@ const styles = StyleSheet.create({
     paddingLeft: wp("4.5%"),
     paddingRight: wp("10%"),
   },
-
-  // ── Icon ──
   iconCol: {
     position: "relative",
     marginRight: wp("3.5%"),
@@ -852,11 +783,6 @@ const styles = StyleSheet.create({
     borderRadius: wp("6%"),
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 5,
-    elevation: 3,
   },
   unreadDot: {
     position: "absolute",
@@ -868,11 +794,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.white,
   },
-
-  // ── Content ──
-  notifContent: {
-    flex: 1,
-  },
+  notifContent: { flex: 1 },
   notifTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -887,10 +809,7 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: wp("5%"),
   },
-  notifTitleUnread: {
-    color: Colors.textPrimary,
-    fontWeight: "800",
-  },
+  notifTitleUnread: { color: Colors.textPrimary, fontWeight: "800" },
   notifTime: {
     fontSize: wp("2.6%"),
     color: Colors.textMuted,
@@ -905,37 +824,6 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     marginBottom: hp("1%"),
   },
-
-  // Meta row
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("2%"),
-    flexWrap: "wrap",
-  },
-  metaChip: {
-    paddingHorizontal: wp("2.5%"),
-    paddingVertical: hp("0.35%"),
-    borderRadius: wp("2%"),
-  },
-  metaChipText: {
-    fontSize: wp("2.8%"),
-    fontWeight: "700",
-    letterSpacing: 0.2,
-  },
-  actionPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("1%"),
-    paddingHorizontal: wp("2.5%"),
-    paddingVertical: hp("0.35%"),
-  },
-  actionPillText: {
-    fontSize: wp("3%"),
-    fontWeight: "700",
-  },
-
-  // ── Delete ──
   deleteBtn: {
     position: "absolute",
     top: wp("3.5%"),
@@ -947,8 +835,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // ── Empty ──
   emptyWrap: {
     flex: 1,
     alignItems: "center",

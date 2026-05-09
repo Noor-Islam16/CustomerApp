@@ -437,14 +437,14 @@ const ProfileScreen = () => {
                 activeOpacity={0.85}
                 onPress={() => handleNavigation("/editprofile")}
               >
-                <Feather name="camera" size={wp("3.5%")} color={Colors.white} />
+                {/* <Feather name="camera" size={wp("3.5%")} color={Colors.white} /> */}
               </TouchableOpacity>
             </View>
 
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{userName}</Text>
               <Text style={styles.profileSub}>
-                {userPhone ? `+91 ${userPhone}` : "Jhole Salers App"}
+                {userPhone ? `+91 ${userPhone}` : "Thump Beyond Limits"}
               </Text>
               {/* Profile completion badge */}
               <View
@@ -569,7 +569,7 @@ const ProfileScreen = () => {
         </TouchableOpacity>
 
         {/* ── App version ── */}
-        <Text style={styles.versionText}>JholeSaler App v1.0.0</Text>
+        <Text style={styles.versionText}>Thump Beyond Limits v1.0.0</Text>
 
         <View style={{ height: hp("10%") }} />
       </ScrollView>
@@ -596,6 +596,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   headerTitle: {
+    fontFamily: "Exotc350BdBTBold",
     fontSize: wp("5.5%"),
     fontWeight: "800",
     color: Colors.white,
@@ -647,6 +648,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     letterSpacing: -0.3,
     marginBottom: hp("0.3%"),
+    fontFamily: "Exotc350BdBTBold",
   },
   profileSub: {
     fontSize: wp("3.2%"),

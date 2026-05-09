@@ -1,12 +1,10 @@
 // screens/HomeScreen.tsx
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { Text } from "expo-dynamic-fonts";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Image,
   Platform,
@@ -14,6 +12,7 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -25,18 +24,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ProductCard from "../../components/ProductCard";
 import Colors from "../../constants/colors";
-import { BANNERS, CATEGORIES, Product } from "../../constants/products";
+import { CATEGORIES, Product } from "../../constants/products";
 import { useCart } from "../../context/CartContext";
 import { apiGetMe } from "../services/api";
 import { ApiProduct, fetchAllProducts } from "../services/productApi";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const BANNER_H_PADDING = wp("5%");
-const BANNER_WIDTH = SCREEN_WIDTH - BANNER_H_PADDING * 2;
-const BANNER_GAP = wp("3%");
 const TAB_BAR_HEIGHT = 60;
 
-// ─── Helper: Convert API product to app Product format ─────────────────────
+// ─── Helper: Convert API product to app Product format (SIMPLIFIED) ──────────
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
   return {
     id: apiProduct._id,
@@ -67,34 +62,20 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
 
 const HomeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const {
-    cartTotal,
-    cartItemCount,
-    addToCart,
-    updateQuantity,
-    getCartQuantity,
-  } = useCart();
+  const { cartTotal, cartItemCount } = useCart();
 
-  // ── State ──
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
 
-  // API Data States
   const [userData, setUserData] = useState<any>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Refs ──
-  const bannerScrollRef = useRef<ScrollView>(null);
-  const bannerAutoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ── Computed ──
   const minOrderThreshold = 500;
   const remaining = minOrderThreshold - cartTotal;
   const showMinOrderWarning = cartTotal > 0 && cartTotal < minOrderThreshold;
@@ -105,84 +86,41 @@ const HomeScreen: React.FC = () => {
   const fetchAllData = useCallback(async () => {
     try {
       setError(null);
-
-      // Fetch user data
       setIsLoadingUser(true);
       try {
         const userResponse = await apiGetMe();
-        if (userResponse.success) {
-          setUserData(userResponse.user);
-          console.log(
-            "👤 User loaded:",
-            userResponse.user.profile?.contactName || userResponse.user.phone,
-          );
-        }
+        if (userResponse.success) setUserData(userResponse.user);
       } catch (userError) {
         console.error("❌ Failed to load user:", userError);
       } finally {
         setIsLoadingUser(false);
       }
 
-      // Fetch products
       setIsLoadingProducts(true);
       try {
         const apiProducts = await fetchAllProducts();
         const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
         setAllProducts(mappedProducts);
-        console.log(`📦 Loaded ${mappedProducts.length} electronics products`);
       } catch (productError) {
         console.error("❌ Failed to load products:", productError);
         setError("Failed to load products. Pull to retry.");
       } finally {
         setIsLoadingProducts(false);
       }
-    } catch (error) {
-      console.error("❌ Error fetching data:", error);
+    } catch (err) {
+      console.error("❌ Error fetching data:", err);
       setError("Something went wrong. Pull to retry.");
     }
   }, []);
 
-  // Initial load
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
 
-  // ── Banner auto-scroll ──
-  const scrollBannerTo = (index: number) => {
-    bannerScrollRef.current?.scrollTo({
-      x: index * (BANNER_WIDTH + BANNER_GAP),
-      animated: true,
-    });
-    setCurrentBannerIndex(index);
-  };
-
-  const startBannerTimer = () => {
-    if (bannerAutoTimer.current) clearInterval(bannerAutoTimer.current);
-    bannerAutoTimer.current = setInterval(() => {
-      setCurrentBannerIndex((prev) => {
-        const next = (prev + 1) % BANNERS.length;
-        bannerScrollRef.current?.scrollTo({
-          x: next * (BANNER_WIDTH + BANNER_GAP),
-          animated: true,
-        });
-        return next;
-      });
-    }, 3500);
-  };
-
-  useEffect(() => {
-    startBannerTimer();
-    return () => {
-      if (bannerAutoTimer.current) clearInterval(bannerAutoTimer.current);
-    };
-  }, []);
-
-  // ── Filter products based on category and search ──────────────────────────
+  // ── Filter products ────────────────────────────────────────────────────────
   useEffect(() => {
     if (allProducts.length === 0) return;
-
     let filtered: Product[];
-
     if (isSearching && searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
       filtered = allProducts.filter(
@@ -190,10 +128,7 @@ const HomeScreen: React.FC = () => {
           product.name.toLowerCase().includes(query) ||
           product.brand.toLowerCase().includes(query) ||
           product.category.toLowerCase().includes(query) ||
-          product.subCategory.toLowerCase().includes(query) ||
-          product.type.toLowerCase().includes(query) ||
-          product.description.toLowerCase().includes(query) ||
-          product.tags.some((tag) => tag.toLowerCase().includes(query)),
+          (product.description || "").toLowerCase().includes(query),
       );
     } else if (selectedCategory === "all") {
       filtered = allProducts;
@@ -203,69 +138,56 @@ const HomeScreen: React.FC = () => {
           product.category.toLowerCase() === selectedCategory.toLowerCase(),
       );
     }
-
     setFilteredProducts(filtered);
   }, [selectedCategory, searchQuery, isSearching, allProducts]);
 
-  // ── Derived product sections (Updated for electronics) ────────────────────
-  const bestSellerProducts = allProducts
-    .filter((p) => p.tags.includes("Best Seller") && p.inStock)
-    .slice(0, 6);
-
-  const fastMovingProducts = allProducts
-    .filter((p) => p.isFastMoving && p.inStock)
-    .slice(0, 6);
-
-  const newArrivalProducts = allProducts
-    .filter((p) => p.tags.includes("New Arrival") && p.inStock)
-    .slice(0, 6);
-
+  // ── Product sections ───────────────────────────────────────────────────────
   const featuredProducts = allProducts
     .filter((p) => p.isFeatured && p.inStock)
     .slice(0, 6);
-
+  const bestSellerProducts = allProducts
+    .filter((p) => p.tags.includes("Best Seller") && p.inStock)
+    .slice(0, 6);
+  const newArrivalProducts = allProducts
+    .filter((p) => p.tags.includes("New Arrival") && p.inStock)
+    .slice(0, 6);
   const allProductsForHorizontal = allProducts
     .filter((p) => p.inStock)
     .slice(0, 6);
 
-  // ── Handlers ──
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleCategoryPress = (categoryId: string) => {
     setSelectedCategory(categoryId);
     setIsSearching(false);
     setSearchQuery("");
   };
-
   const handleSearch = (text: string) => {
     setSearchQuery(text);
     setIsSearching(text.length > 0);
   };
-
   const handleClearSearch = () => {
     setSearchQuery("");
     setIsSearching(false);
   };
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAllData();
     setRefreshing(false);
   }, [fetchAllData]);
 
-  // ── User display helpers ──────────────────────────────────────────────────
+  // ── User display ───────────────────────────────────────────────────────────
   const getUserDisplayName = () => {
     if (isLoadingUser) return "Loading...";
     if (userData?.profile?.contactName) return userData.profile.contactName;
     if (userData?.phone) return `+91 ${userData.phone}`;
     return "Guest User";
   };
-
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return "Good Morning";
     if (hour < 17) return "Good Afternoon";
     return "Good Evening";
   };
-
   const getUserAvatar = () => {
     if (userData?.profile?.contactName) {
       return `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.profile.contactName)}&background=6C63FF&color=fff&size=150`;
@@ -278,7 +200,7 @@ const HomeScreen: React.FC = () => {
   const scrollBottomPad =
     tabBarTotalHeight + cartBarHeight + warningBarHeight + hp("2%");
 
-  // ── Loading State ─────────────────────────────────────────────────────────
+  // ── Loading State ──────────────────────────────────────────────────────────
   if (isLoadingProducts && allProducts.length === 0) {
     return (
       <View style={[styles.root, styles.centerContent]}>
@@ -295,7 +217,7 @@ const HomeScreen: React.FC = () => {
     );
   }
 
-  // ── Error State ───────────────────────────────────────────────────────────
+  // ── Error State ────────────────────────────────────────────────────────────
   if (error && allProducts.length === 0) {
     return (
       <View style={[styles.root, styles.centerContent]}>
@@ -339,7 +261,7 @@ const HomeScreen: React.FC = () => {
           />
         }
       >
-        {/* ── Header Gradient ── */}
+        {/* ── Header ── */}
         <LinearGradient
           colors={[
             Colors.gradientStart,
@@ -399,7 +321,6 @@ const HomeScreen: React.FC = () => {
             </View>
           </View>
 
-          {/* Search bar */}
           <View style={styles.searchContainer}>
             <Feather name="search" size={wp("4.5%")} color={Colors.textMuted} />
             <TextInput
@@ -422,81 +343,9 @@ const HomeScreen: React.FC = () => {
           </View>
         </LinearGradient>
 
-        {/* ── BANNERS ── */}
-        <View style={styles.bannerWrapper}>
-          <View style={styles.bannerSection}>
-            <ScrollView
-              ref={bannerScrollRef}
-              horizontal
-              pagingEnabled={false}
-              snapToInterval={BANNER_WIDTH + BANNER_GAP}
-              snapToAlignment="start"
-              decelerationRate="fast"
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.bannerScrollContent}
-              onMomentumScrollEnd={(e) => {
-                const idx = Math.round(
-                  e.nativeEvent.contentOffset.x / (BANNER_WIDTH + BANNER_GAP),
-                );
-                setCurrentBannerIndex(idx);
-                startBannerTimer();
-              }}
-            >
-              {BANNERS.map((banner) => (
-                <LinearGradient
-                  key={banner.id}
-                  colors={[
-                    banner.backgroundColor,
-                    banner.backgroundColor + "DD",
-                  ]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.bannerCard}
-                >
-                  <Text
-                    style={[styles.bannerIcon, { color: banner.textColor }]}
-                  >
-                    {banner.icon}
-                  </Text>
-                  <View style={styles.bannerTextBlock}>
-                    <Text
-                      style={[styles.bannerTitle, { color: banner.textColor }]}
-                      numberOfLines={1}
-                    >
-                      {banner.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.bannerSubtitle,
-                        { color: banner.textColor },
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {banner.subtitle}
-                    </Text>
-                  </View>
-                </LinearGradient>
-              ))}
-            </ScrollView>
-
-            <View style={styles.dotsRow}>
-              {BANNERS.map((_, i) => (
-                <TouchableOpacity key={i} onPress={() => scrollBannerTo(i)}>
-                  <View
-                    style={[
-                      styles.dot,
-                      currentBannerIndex === i && styles.dotActive,
-                    ]}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-
-        {/* ── Page body ── */}
+        {/* ── Page Body ── */}
         <View style={styles.pageBody}>
-          {/* ── CATEGORIES ── */}
+          {/* Categories */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { marginBottom: hp("1.5%") }]}>
               Shop by Category
@@ -547,20 +396,13 @@ const HomeScreen: React.FC = () => {
             </ScrollView>
           </View>
 
-          {/* ── FEATURED SECTION ── */}
+          {/* Featured */}
           {featuredProducts.length > 0 &&
             !isSearching &&
             selectedCategory === "all" && (
               <View style={styles.section}>
                 <View style={styles.productHeader}>
-                  <View style={styles.titleWithIcon}>
-                    {/* <MaterialCommunityIcons
-                      name="star"
-                      size={wp("5%")}
-                      color="#FFB800"
-                    /> */}
-                    <Text style={styles.sectionTitle}>Featured</Text>
-                  </View>
+                  <Text style={styles.sectionTitle}>Featured Products</Text>
                   <TouchableOpacity
                     style={styles.viewAllBtn}
                     onPress={() => router.push("/products")}
@@ -587,55 +429,13 @@ const HomeScreen: React.FC = () => {
               </View>
             )}
 
-          {/* ── FAST MOVING SECTION ── */}
-          {fastMovingProducts.length > 0 &&
-            !isSearching &&
-            selectedCategory === "all" && (
-              <View style={styles.section}>
-                <View style={styles.productHeader}>
-                  <View style={styles.titleWithIcon}>
-                    {/* <MaterialCommunityIcons
-                      name="fire"
-                      size={wp("5%")}
-                      color="#FF6B00"
-                    /> */}
-                    <Text style={styles.sectionTitle}>Fast Moving</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => router.push("/products")}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Feather
-                      name="chevron-right"
-                      size={wp("4%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalProductScroll}
-                >
-                  {fastMovingProducts.map((product) => (
-                    <View key={product.id} style={styles.horizontalProductCard}>
-                      <ProductCard product={product} hideTags={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-          {/* ── BEST SELLER SECTION ── */}
+          {/* Best Sellers */}
           {bestSellerProducts.length > 0 &&
             !isSearching &&
             selectedCategory === "all" && (
               <View style={styles.section}>
                 <View style={styles.productHeader}>
-                  <View style={styles.titleWithIcon}>
-                    <Text style={styles.sectionTitle}>Best Sellers</Text>
-                  </View>
+                  <Text style={styles.sectionTitle}>Best Sellers</Text>
                   <TouchableOpacity
                     style={styles.viewAllBtn}
                     onPress={() => router.push("/products")}
@@ -662,7 +462,7 @@ const HomeScreen: React.FC = () => {
               </View>
             )}
 
-          {/* ── NEW ARRIVALS SECTION ── */}
+          {/* New Arrivals */}
           {newArrivalProducts.length > 0 &&
             !isSearching &&
             selectedCategory === "all" && (
@@ -702,7 +502,7 @@ const HomeScreen: React.FC = () => {
               </View>
             )}
 
-          {/* ── ALL PRODUCTS SECTION ── */}
+          {/* All Products */}
           {!isSearching &&
             selectedCategory === "all" &&
             allProductsForHorizontal.length > 0 && (
@@ -735,7 +535,7 @@ const HomeScreen: React.FC = () => {
               </View>
             )}
 
-          {/* ── CATEGORY/SEARCH PRODUCTS (Grid) ── */}
+          {/* Category/Search Results Grid */}
           {(isSearching || selectedCategory !== "all") && (
             <View style={styles.section}>
               <View style={styles.productHeader}>
@@ -759,7 +559,6 @@ const HomeScreen: React.FC = () => {
                   </TouchableOpacity>
                 )}
               </View>
-
               {filteredProducts.length > 0 ? (
                 <FlatList
                   data={filteredProducts}
@@ -787,7 +586,7 @@ const HomeScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* ── MIN ORDER WARNING BAR ── */}
+      {/* Min Order Warning */}
       {showMinOrderWarning && (
         <View
           style={[
@@ -802,7 +601,7 @@ const HomeScreen: React.FC = () => {
         </View>
       )}
 
-      {/* ── CART BOTTOM BAR ── */}
+      {/* Cart Bar */}
       {cartItemCount > 0 && (
         <View style={[styles.cartBar, { bottom: tabBarTotalHeight }]}>
           <View style={styles.cartBarInner}>
@@ -841,7 +640,7 @@ const HomeScreen: React.FC = () => {
   );
 };
 
-// ─── Styles (unchanged from original) ─────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
   centerContent: {
@@ -852,7 +651,7 @@ const styles = StyleSheet.create({
   scrollContent: {},
   headerGradient: {
     paddingHorizontal: wp("5%"),
-    paddingBottom: hp("6%"),
+    paddingBottom: hp("3%"),
     borderBottomLeftRadius: wp("8%"),
     borderBottomRightRadius: wp("8%"),
   },
@@ -927,49 +726,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     height: "100%",
   },
-  bannerWrapper: { marginTop: -hp("3%") },
-  bannerSection: {
-    paddingHorizontal: BANNER_H_PADDING,
-    marginBottom: hp("1%"),
-  },
-  bannerScrollContent: { gap: BANNER_GAP, paddingRight: BANNER_H_PADDING },
-  bannerCard: {
-    width: BANNER_WIDTH,
-    borderRadius: wp("4%"),
-    paddingVertical: hp("2.5%"),
-    paddingHorizontal: wp("5%"),
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("4%"),
-    overflow: "hidden",
-  },
-  bannerIcon: { fontSize: wp("10%") },
-  bannerTextBlock: { flex: 1 },
-  bannerTitle: {
-    fontSize: wp("4.2%"),
-    fontWeight: "800",
-    marginBottom: hp("0.4%"),
-  },
-  bannerSubtitle: { fontSize: wp("3.1%"), fontWeight: "500", opacity: 0.88 },
-  dotsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: wp("1.5%"),
-    marginTop: hp("1.2%"),
-  },
-  dot: {
-    width: wp("1.8%"),
-    height: wp("1.8%"),
-    borderRadius: wp("0.9%"),
-    backgroundColor: Colors.border,
-  },
-  dotActive: {
-    backgroundColor: Colors.primary,
-    width: wp("4.5%"),
-    borderRadius: wp("0.9%"),
-  },
-  pageBody: { backgroundColor: Colors.background },
+  pageBody: { backgroundColor: Colors.background, paddingTop: hp("2%") },
   section: { paddingHorizontal: wp("4%"), marginBottom: hp("2.5%") },
   sectionTitle: {
     fontSize: wp("4.3%"),

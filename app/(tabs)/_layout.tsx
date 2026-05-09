@@ -1,4 +1,6 @@
+// tabs/_layout.tsx
 import { Ionicons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 import { Tabs } from "expo-router";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
@@ -12,12 +14,6 @@ const tabConfig = [
     iconActive: "home",
     iconInactive: "home-outline",
   },
-  // {
-  //   name: "category",
-  //   label: "Category",
-  //   iconActive: "grid",
-  //   iconInactive: "grid-outline",
-  // },
   {
     name: "myorders",
     label: "My Orders",
@@ -36,10 +32,19 @@ const tabConfig = [
 const CustomTabBar = ({ state, descriptors, navigation }: any) => {
   const insets = useSafeAreaInsets();
 
+  // Get font loaded state - you can pass this as a prop
+  const [fontsLoaded] = useFonts({
+    Exotc350BdBTBold: require("@/assets/fonts/exotic.ttf"),
+  });
+
   // Calculate dynamic bottom padding based on system navigation bar
   const systemNavHeight = insets.bottom;
   const tabBarHeight = 60;
   const totalHeight = tabBarHeight + systemNavHeight;
+
+  if (!fontsLoaded) {
+    return null; // Or a loading placeholder
+  }
 
   return (
     <View
@@ -135,10 +140,11 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
                   />
                 </View>
 
-                {/* Label */}
+                {/* Label with custom font */}
                 <Text
                   style={{
                     fontSize: 11,
+                    fontFamily: "Exotc350BdBTBold", // ✅ Added custom font
                     fontWeight: isFocused ? "600" : "400",
                     color: textColor,
                     textAlign: "center",
@@ -180,12 +186,6 @@ export default function TabsLayout() {
           tabBarAccessibilityLabel: "Home Tab",
         }}
       />
-      {/* <Tabs.Screen
-        name="category"
-        options={{
-          tabBarAccessibilityLabel: "Category Tab",
-        }}
-      /> */}
       <Tabs.Screen
         name="myorders"
         options={{

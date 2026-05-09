@@ -1,4 +1,4 @@
-package com.asrtech123.JholeSaler
+package com.asrtech123.Thump
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

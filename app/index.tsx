@@ -576,12 +576,12 @@ const LoginScreen: React.FC = () => {
           >
             <View style={styles.logoContainer}>
               <Image
-                source={require("../assets/images/logo.jpeg")}
+                source={require("../assets/images/logo.png")}
                 style={styles.logoImage}
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.appName}>JholeSaler</Text>
+            {/* <Text style={styles.appName}>Thump Beyond Limits</Text> */}
             <Text style={styles.tagline}>
               Electronic Accessories In Your Way.
             </Text>
@@ -1361,7 +1361,7 @@ const LoginScreen: React.FC = () => {
             )}
           </Animated.View>
 
-          <Text style={styles.footer}>JholeSaler © 2026</Text>
+          <Text style={styles.footer}>Thump Beyond Limits © 2026</Text>
         </ScrollView>
       </KeyboardAvoidingView>
 

@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Image,
   Modal,
@@ -25,53 +24,31 @@ import {
 import Colors from "../../constants/colors";
 import { apiCancelOrder, apiGetMyOrders, Order } from "../services/api";
 
-const { width: SW } = Dimensions.get("window");
-
-// ─── Order Status Config ──────────────────────────────────────────────────────
+// ─── SIMPLIFIED Order Status Config ─────────────────────────────────────────
 const ORDER_STATUS_CONFIG: Record<
   string,
-  {
-    label: string;
-    color: string;
-    bg: string;
-    icon: string;
-    step: number;
-  }
+  { label: string; color: string; bg: string; icon: string; step: number }
 > = {
-  pending: {
-    label: "Pending",
-    color: "#FF9800",
-    bg: "#FFF8E1",
-    icon: "clock",
-    step: 1,
-  },
   confirmed: {
     label: "Confirmed",
     color: "#2196F3",
     bg: "#E3F7FD",
     icon: "check-circle",
-    step: 2,
+    step: 1,
   },
   processing: {
     label: "Processing",
     color: "#8B5CF6",
     bg: "#F5F3FF",
     icon: "package",
-    step: 3,
+    step: 2,
   },
-  out_for_delivery: {
-    label: "Out for Delivery",
-    color: "#00A884",
-    bg: "#E8F5E9",
-    icon: "truck",
-    step: 4,
-  },
-  delivered: {
-    label: "Delivered",
+  completed: {
+    label: "Completed",
     color: "#4CAF50",
     bg: "#E8F5E9",
     icon: "check-circle",
-    step: 5,
+    step: 3,
   },
   cancelled: {
     label: "Cancelled",
@@ -92,12 +69,10 @@ const TABS = [
 
 // ─── Helper: Get product image ───────────────────────────────────────────────
 const getProductImage = (item: any) => {
-  // Check for images array first (new format)
   if (item.images && item.images.length > 0) {
     const primary = item.images.find((img: any) => img.isPrimary);
     return primary?.url || item.images[0].url;
   }
-  // Fallback to imageUrl (old format)
   if (item.imageUrl) return item.imageUrl;
   return "https://via.placeholder.com/60";
 };
@@ -113,17 +88,10 @@ const getItemSubtitle = (item: any): string => {
   return parts.join(" · ") || "";
 };
 
-// ─── Order Status Tracker Component ──────────────────────────────────────────
+// ─── SIMPLIFIED Order Status Tracker ────────────────────────────────────────
 const OrderStatusTracker = ({ status }: { status: string }) => {
-  const statusConfig = ORDER_STATUS_CONFIG[status];
-  const steps = [
-    "pending",
-    "confirmed",
-    "processing",
-    "out_for_delivery",
-    "delivered",
-  ];
-  const currentStep = statusConfig?.step || 0;
+  const steps = ["confirmed", "processing", "completed"];
+  const currentStep = ORDER_STATUS_CONFIG[status]?.step || 0;
 
   if (status === "cancelled") {
     return (
@@ -197,7 +165,7 @@ const OrderCard = ({
   onCancel: () => void;
 }) => {
   const statusCfg =
-    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.pending;
+    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.confirmed;
   const total = order.totalAmount;
 
   return (
@@ -244,9 +212,7 @@ const OrderCard = ({
         {order.items.slice(0, 2).map((item, index) => (
           <View key={index} style={styles.previewItem}>
             <Image
-              source={{
-                uri: getProductImage(item),
-              }}
+              source={{ uri: getProductImage(item) }}
               style={styles.previewImage}
             />
             <Text style={styles.previewQuantity}>x{item.quantity}</Text>
@@ -272,43 +238,19 @@ const OrderCard = ({
 
       {/* Footer */}
       <View style={styles.cardFooter}>
-        {order.status === "delivered" ? (
-          <TouchableOpacity style={styles.footerBtn}>
-            <Feather
-              name="rotate-cw"
-              size={wp("3.5%")}
-              color={Colors.primary}
-            />
-            <Text style={styles.footerBtnText}>Reorder</Text>
+        {(order.status === "confirmed" || order.status === "processing") && (
+          <TouchableOpacity
+            style={[styles.footerBtn, styles.cancelBtn]}
+            onPress={onCancel}
+          >
+            <Feather name="x" size={wp("3.5%")} color="#E53935" />
+            <Text style={[styles.footerBtnText, { color: "#E53935" }]}>
+              Cancel
+            </Text>
           </TouchableOpacity>
-        ) : order.status === "cancelled" ? (
-          <TouchableOpacity style={styles.footerBtn}>
-            <Feather
-              name="rotate-cw"
-              size={wp("3.5%")}
-              color={Colors.primary}
-            />
-            <Text style={styles.footerBtnText}>Buy Again</Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            {order.status === "pending" && (
-              <TouchableOpacity
-                style={[styles.footerBtn, styles.cancelBtn]}
-                onPress={onCancel}
-              >
-                <Feather name="x" size={wp("3.5%")} color="#E53935" />
-                <Text style={[styles.footerBtnText, { color: "#E53935" }]}>
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-            )}
-          </>
         )}
         <TouchableOpacity style={styles.trackBtn}>
-          <Text style={styles.trackBtnText}>
-            {order.status === "delivered" ? "View Details" : "Track Order"}
-          </Text>
+          <Text style={styles.trackBtnText}>View Details</Text>
           <Feather
             name="chevron-right"
             size={wp("3.5%")}
@@ -333,7 +275,7 @@ const OrderDetailsModal = ({
   if (!order) return null;
 
   const statusCfg =
-    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.pending;
+    ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.confirmed;
 
   return (
     <Modal
@@ -431,32 +373,18 @@ const OrderDetailsModal = ({
                 {order.items.map((item, index) => (
                   <View key={index} style={styles.orderItem}>
                     <Image
-                      source={{
-                        uri: getProductImage(item),
-                      }}
+                      source={{ uri: getProductImage(item) }}
                       style={styles.orderItemImage}
                     />
                     <View style={styles.orderItemDetails}>
                       <Text style={styles.orderItemName}>{item.name}</Text>
-                      {/* Updated: Show electronics-specific details */}
                       <Text style={styles.orderItemManufacturer}>
                         {getItemSubtitle(item)}
                       </Text>
-                      {item.dimensions && (
-                        <Text style={styles.orderItemSpec}>
-                          📐 {item.dimensions}
-                        </Text>
-                      )}
-                      {item.weight && (
-                        <Text style={styles.orderItemSpec}>
-                          ⚖️ {item.weight}
-                        </Text>
-                      )}
                       <Text style={styles.orderItemPrice}>
                         ₹{item.sellingPrice} × {item.quantity} = ₹
                         {item.lineTotal}
                       </Text>
-                      {/* Show original price if discounted */}
                       {item.originalPrice &&
                         item.originalPrice > item.sellingPrice && (
                           <Text style={styles.orderItemOriginalPrice}>
@@ -541,7 +469,7 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
       case "active":
         return {
           title: "No Active Orders",
-          subtitle: "You don't have any active orders",
+          subtitle: "Your active orders will appear here",
           icon: "package",
         };
       case "completed":
@@ -565,7 +493,6 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
     }
   };
   const message = getEmptyMessage();
-
   return (
     <View style={styles.emptyWrap}>
       <View style={styles.emptyIconCircle}>
@@ -601,12 +528,8 @@ const MyOrdersScreen = () => {
   const fetchOrders = useCallback(async () => {
     try {
       const response = await apiGetMyOrders({ limit: 50 });
-      if (response.success) {
-        setOrders(response.data.orders);
-        console.log(`📦 Loaded ${response.data.orders.length} orders`);
-      }
+      if (response.success) setOrders(response.data.orders);
     } catch (error: any) {
-      console.error("Failed to fetch orders:", error);
       Alert.alert("Error", error.message || "Failed to load orders");
     } finally {
       setLoading(false);
@@ -639,17 +562,17 @@ const MyOrdersScreen = () => {
   const filteredOrders = orders.filter((order) => {
     if (activeTab === "all") return true;
     if (activeTab === "active")
-      return !["delivered", "cancelled"].includes(order.status);
-    if (activeTab === "completed") return order.status === "delivered";
+      return !["completed", "cancelled"].includes(order.status);
+    if (activeTab === "completed") return order.status === "completed";
     if (activeTab === "cancelled") return order.status === "cancelled";
     return true;
   });
 
   const stats = {
     total: orders.length,
-    active: orders.filter((o) => !["delivered", "cancelled"].includes(o.status))
+    active: orders.filter((o) => !["completed", "cancelled"].includes(o.status))
       .length,
-    completed: orders.filter((o) => o.status === "delivered").length,
+    completed: orders.filter((o) => o.status === "completed").length,
   };
 
   const onRefresh = useCallback(async () => {
@@ -678,8 +601,6 @@ const MyOrdersScreen = () => {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor="#00A884" />
-
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity
@@ -692,8 +613,6 @@ const MyOrdersScreen = () => {
           <Text style={styles.headerTitle}>My Orders</Text>
           <View style={{ width: wp("10%") }} />
         </View>
-
-        {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.total}</Text>
@@ -716,7 +635,6 @@ const MyOrdersScreen = () => {
         </View>
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabsContainer}>
         <ScrollView
           horizontal
@@ -749,7 +667,6 @@ const MyOrdersScreen = () => {
         </ScrollView>
       </View>
 
-      {/* List */}
       {filteredOrders.length === 0 ? (
         <EmptyState activeTab={activeTab} />
       ) : (
@@ -787,11 +704,9 @@ const MyOrdersScreen = () => {
   );
 };
 
-// ─── Styles (keep existing styles, add new ones below) ────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-
-  // Header
   header: {
     paddingTop: Platform.OS === "ios" ? hp("6%") : hp("6%"),
     paddingBottom: hp("2%"),
@@ -836,8 +751,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.3)",
     marginVertical: hp("0.5%"),
   },
-
-  // Tabs
   tabsContainer: {
     backgroundColor: Colors.white,
     borderBottomWidth: 1,
@@ -864,15 +777,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderRadius: 1,
   },
-
-  // List
   listContent: {
     paddingTop: hp("1.5%"),
     paddingHorizontal: wp("4%"),
     paddingBottom: hp("13%"),
   },
-
-  // Order Card
   orderCard: {
     backgroundColor: Colors.surface,
     borderRadius: wp("4%"),
@@ -963,8 +872,6 @@ const styles = StyleSheet.create({
     marginBottom: hp("1.5%"),
   },
   itemsSummaryText: { fontSize: wp("3.2%"), color: Colors.textSecondary },
-
-  // Tracker
   trackerContainer: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1022,8 +929,6 @@ const styles = StyleSheet.create({
     borderRadius: wp("2%"),
   },
   cancelledText: { fontSize: wp("3.5%"), fontWeight: "600", color: "#E53935" },
-
-  // Card Footer
   cardFooter: {
     flexDirection: "row",
     alignItems: "center",
@@ -1055,8 +960,6 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: "600",
   },
-
-  // Empty State
   emptyWrap: {
     flex: 1,
     alignItems: "center",
@@ -1095,8 +998,6 @@ const styles = StyleSheet.create({
     borderRadius: wp("5%"),
   },
   emptyBtnText: { fontSize: wp("3.8%"), color: "#fff", fontWeight: "700" },
-
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -1207,18 +1108,11 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginBottom: 2,
   },
-  // New: Item specifications
-  orderItemSpec: {
-    fontSize: wp("2.5%"),
-    color: Colors.textSecondary,
-    marginBottom: 1,
-  },
   orderItemPrice: {
     fontSize: wp("3.2%"),
     color: Colors.primary,
     fontWeight: "600",
   },
-  // New: Original price
   orderItemOriginalPrice: {
     fontSize: wp("2.5%"),
     color: Colors.textMuted,

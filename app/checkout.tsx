@@ -48,15 +48,14 @@ interface UserProfile {
   city?: string;
   state?: string;
   pincode?: string;
+  gstNumber?: string;
 }
 
 // ─── Helper: Get price from product (handles both API and legacy formats) ─────
 const getProductPrice = (product: any): number => {
-  // Check for sellingPrice first (new electronics format)
   if (product.sellingPrice !== undefined && product.sellingPrice !== null) {
     return product.sellingPrice;
   }
-  // Fallback to other possible price fields
   return product.price || product.originalPrice || 0;
 };
 
@@ -77,8 +76,10 @@ const CheckoutScreen: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [userPhone, setUserPhone] = useState<string>("");
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [approvalStatus, setApprovalStatus] = useState<string>("pending");
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [countdown, setCountdown] = useState(10);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
@@ -92,11 +93,9 @@ const CheckoutScreen: React.FC = () => {
       try {
         const parsed = JSON.parse(params.orderData as string);
 
-        // ✅ Fix: Recalculate item totals with sellingPrice
         if (parsed.items) {
           parsed.items = parsed.items.map((item: any) => ({
             ...item,
-            // Ensure product has sellingPrice (handles both old and new format)
             product: {
               ...item.product,
               sellingPrice: getProductPrice(item.product),
@@ -106,7 +105,6 @@ const CheckoutScreen: React.FC = () => {
 
         setOrderData(parsed);
 
-        // Debug: Log the prices
         console.log(
           "📋 Checkout items:",
           parsed.items.map((i: any) => ({
@@ -130,6 +128,7 @@ const CheckoutScreen: React.FC = () => {
         const res = await apiGetMe();
         setUserProfile(res.user.profile);
         setUserPhone(res.user.phone);
+        setApprovalStatus(res.user.approvalStatus || "pending");
       } catch {
         setUserProfile(null);
       } finally {
@@ -182,7 +181,6 @@ const CheckoutScreen: React.FC = () => {
 
     if (!orderData || !userProfile) return;
 
-    // Guard: need address
     if (
       !userProfile.contactName ||
       !userProfile.addressLine1 ||
@@ -201,7 +199,6 @@ const CheckoutScreen: React.FC = () => {
     setIsPlacingOrder(true);
 
     try {
-      // Build items payload — map from cart format to API format
       const itemsPayload = orderData.items.map((item: any) => ({
         productId: item.product._id || item.product.id,
         quantity: item.quantity,
@@ -230,7 +227,6 @@ const CheckoutScreen: React.FC = () => {
 
       const result = await apiPlaceOrder(payload);
 
-      // Success
       clearCart();
       setPlacedOrder(result.data);
 
@@ -275,6 +271,22 @@ const CheckoutScreen: React.FC = () => {
       );
       return;
     }
+
+    // ✅ Check approval status before allowing payment
+    if (approvalStatus === "pending" || approvalStatus === "manual") {
+      setShowApprovalModal(true);
+      return;
+    }
+
+    if (approvalStatus === "rejected") {
+      Alert.alert(
+        "Account Not Approved",
+        "Your account has been rejected. Please contact support for more information.",
+        [{ text: "Go to Home", onPress: () => router.push("/(tabs)/home") }],
+      );
+      return;
+    }
+
     setShowPaymentModal(true);
   };
 
@@ -532,6 +544,78 @@ const CheckoutScreen: React.FC = () => {
         </LinearGradient>
       </View>
 
+      {/* ── Approval Pending Modal ── */}
+      <Modal
+        visible={showApprovalModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowApprovalModal(false)}
+      >
+        <View style={styles.approvalModalOverlay}>
+          <View style={styles.approvalModalContent}>
+            {/* Icon */}
+            <View style={styles.approvalIconCircle}>
+              <MaterialCommunityIcons
+                name="clock-outline"
+                size={wp("12%")}
+                color="#D97706"
+              />
+            </View>
+
+            {/* Title */}
+            <Text style={styles.approvalModalTitle}>
+              Account Under Review ⏳
+            </Text>
+
+            {/* Message */}
+            <Text style={styles.approvalModalMessage}>
+              {approvalStatus === "manual"
+                ? "Your profile is under manual review by our admin team. You'll be able to place orders once your account is approved."
+                : "Your account is currently pending approval. Our admin team will review your profile within 24 hours. We'll notify you once approved."}
+            </Text>
+
+            {/* Additional Info */}
+            <View style={styles.approvalInfoCard}>
+              <Feather name="info" size={wp("4%")} color="#D97706" />
+              <Text style={styles.approvalInfoText}>
+                {userProfile?.gstNumber
+                  ? "GST verification in progress. This usually takes a few hours."
+                  : "No GST provided. Admin will manually review your profile."}
+              </Text>
+            </View>
+
+            {/* Go to Home Button */}
+            <TouchableOpacity
+              style={styles.approvalGoHomeBtn}
+              onPress={() => {
+                setShowApprovalModal(false);
+                router.push("/(tabs)/home");
+              }}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={[Colors.primary, Colors.primaryDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.approvalGoHomeGradient}
+              >
+                <Feather name="home" size={wp("4.5%")} color={Colors.white} />
+                <Text style={styles.approvalGoHomeText}>Go to Home</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Close Button */}
+            <TouchableOpacity
+              style={styles.approvalCloseBtn}
+              onPress={() => setShowApprovalModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.approvalCloseText}>Maybe Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Payment QR Modal ── */}
       <Modal
         visible={showPaymentModal}
@@ -557,7 +641,6 @@ const CheckoutScreen: React.FC = () => {
               Scan the QR code with any UPI app
             </Text>
 
-            {/* QR Placeholder */}
             <View style={styles.qrContainer}>
               <View style={styles.qrCode}>
                 <MaterialCommunityIcons
@@ -571,7 +654,6 @@ const CheckoutScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Countdown */}
             <View style={styles.countdownContainer}>
               <Text style={styles.countdownText}>
                 Auto-confirming in {countdown}s
@@ -619,7 +701,7 @@ const CheckoutScreen: React.FC = () => {
   );
 };
 
-// ─── Styles (unchanged) ───────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: {
@@ -786,11 +868,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  paymentOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("3%"),
-  },
+  paymentOption: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   paymentOptionText: {
     flex: 1,
     fontSize: wp("3.5%"),
@@ -921,6 +999,98 @@ const styles = StyleSheet.create({
     fontSize: wp("4%"),
     fontWeight: "700",
     color: Colors.white,
+  },
+
+  // ── Approval Modal Styles ──────────────────────────────────────────────────
+  approvalModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: wp("8%"),
+  },
+  approvalModalContent: {
+    backgroundColor: Colors.white,
+    borderRadius: wp("6%"),
+    padding: wp("6%"),
+    alignItems: "center",
+    width: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  approvalIconCircle: {
+    width: wp("22%"),
+    height: wp("22%"),
+    borderRadius: wp("11%"),
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: hp("2.5%"),
+    borderWidth: 3,
+    borderColor: "#FCD34D",
+  },
+  approvalModalTitle: {
+    fontSize: wp("5%"),
+    fontWeight: "800",
+    color: Colors.textPrimary,
+    textAlign: "center",
+    marginBottom: hp("1.5%"),
+  },
+  approvalModalMessage: {
+    fontSize: wp("3.5%"),
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: wp("5.5%"),
+    marginBottom: hp("2%"),
+  },
+  approvalInfoCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FEF3C7",
+    borderRadius: wp("3%"),
+    padding: wp("3.5%"),
+    gap: wp("2.5%"),
+    marginBottom: hp("2.5%"),
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    width: "100%",
+  },
+  approvalInfoText: {
+    flex: 1,
+    fontSize: wp("3.2%"),
+    color: "#92400E",
+    lineHeight: wp("4.8%"),
+    fontWeight: "500",
+  },
+  approvalGoHomeBtn: {
+    width: "100%",
+    borderRadius: wp("3.5%"),
+    overflow: "hidden",
+    marginBottom: hp("1.2%"),
+  },
+  approvalGoHomeGradient: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: wp("2.5%"),
+    paddingVertical: hp("1.8%"),
+  },
+  approvalGoHomeText: {
+    fontSize: wp("4%"),
+    fontWeight: "700",
+    color: Colors.white,
+  },
+  approvalCloseBtn: {
+    paddingVertical: hp("1.2%"),
+    paddingHorizontal: wp("6%"),
+  },
+  approvalCloseText: {
+    fontSize: wp("3.5%"),
+    color: Colors.textMuted,
+    fontWeight: "600",
   },
 });
 

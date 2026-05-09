@@ -5,8 +5,9 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
-import { Stack, useRouter } from "expo-router";
+import { SplashScreen, Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import "react-native-reanimated";
@@ -19,29 +20,42 @@ export const unstable_settings = {
   anchor: "(tabs)",
 };
 
+// Prevent splash screen from auto-hiding
+SplashScreen.preventAutoHideAsync();
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
+
+  // ALL HOOKS must be declared before any conditional returns
+  const [fontsLoaded] = useFonts({
+    Exotc350BdBTBold: require("@/assets/fonts/exotic.ttf"),
+  });
+
   const [notification, setNotification] = useState<any>(null);
 
-  // ✅ Fixed: Pass null as initial value
   const notificationListener = useRef<Notifications.EventSubscription | null>(
     null,
   );
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
+  // Hide splash screen once fonts are loaded
   useEffect(() => {
-    // Register for push notifications
+    if (fontsLoaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  // Notification effects
+  useEffect(() => {
     registerForPushNotificationsAsync();
 
-    // Listen for notifications while app is in foreground
     notificationListener.current =
       Notifications.addNotificationReceivedListener((notif) => {
         console.log("📬 Notification received in foreground:", notif);
         setNotification(notif);
       });
 
-    // Handle notification taps
     responseListener.current = addNotificationResponseReceivedListener(
       (screen) => {
         console.log("🧭 Navigating to:", screen);
@@ -49,16 +63,9 @@ export default function RootLayout() {
       },
     );
 
-    // Check if app was opened from a notification
     checkInitialNotification();
 
     return () => {
-      // ✅ Fixed: Use addNotificationReceivedListener's return value directly
-      Notifications.addNotificationReceivedListener((_notif) => {
-        // This creates a new listener, we need to remove the actual subscription
-      });
-
-      // Clean up properly
       if (notificationListener.current) {
         notificationListener.current.remove();
       }
@@ -68,8 +75,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Check if app was opened from a killed state via notification
-  // In your checkInitialNotification function, add this:
   const checkInitialNotification = async () => {
     try {
       const response = await Notifications.getLastNotificationResponseAsync();
@@ -77,7 +82,6 @@ export default function RootLayout() {
         const data = response.notification.request.content.data;
         console.log("🚀 App opened from notification:", data);
 
-        // ✅ Handle approval status notifications
         if (data?.type === "approval_status") {
           setTimeout(() => {
             if (data.status === "approved") {
@@ -88,7 +92,6 @@ export default function RootLayout() {
           }, 1000);
         }
 
-        // Handle order status updates
         if (data?.type === "order_status_update" && data?.orderId) {
           setTimeout(() => {
             router.push(`/(tabs)/myorders?orderId=${data.orderId}` as any);
@@ -99,6 +102,11 @@ export default function RootLayout() {
       console.error("Failed to check initial notification:", error);
     }
   };
+
+  // NOW it's safe to conditionally return after all hooks
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>

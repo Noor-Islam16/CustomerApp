@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.asrtech123.JholeSaler'
+    namespace 'com.asrtech123.Thump'
     defaultConfig {
-        applicationId 'com.asrtech123.JholeSaler'
+        applicationId 'com.asrtech123.Thump'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
