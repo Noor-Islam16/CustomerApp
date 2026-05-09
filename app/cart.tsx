@@ -1,4 +1,4 @@
-import { Text } from "@/components/CustomText";
+import { Text } from "@/context/FontContext";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";

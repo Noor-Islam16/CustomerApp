@@ -676,7 +676,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.8)",
   },
   greeting: { fontSize: wp("3%"), color: "rgba(255,255,255,0.88)" },
-  userName: { fontSize: wp("4.2%"), fontWeight: "700", color: Colors.white },
+  userName: {
+    fontSize: wp("4.2%"),
+    fontWeight: "700",
+    color: Colors.white,
+  },
   headerActions: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   iconButton: { position: "relative", padding: wp("1.5%") },
   notificationBadge: {

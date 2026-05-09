@@ -1,4 +1,4 @@
-import { Text } from "@/components/CustomText";
+import { Text } from "@/context/FontContext";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";

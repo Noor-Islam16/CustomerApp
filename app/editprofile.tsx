@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — app/editprofile.tsx  (full file, replace yours)
 // ─────────────────────────────────────────────────────────────────────────────
-import { Text } from "@/components/CustomText";
+import { Text } from "@/context/FontContext";
 import { Ionicons } from "@expo/vector-icons";
 import Feather from "@expo/vector-icons/Feather";
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
