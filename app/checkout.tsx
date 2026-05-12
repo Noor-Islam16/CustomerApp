@@ -238,7 +238,7 @@ const CheckoutScreen: React.FC = () => {
             text: "View Order",
             onPress: () =>
               router.replace({
-                pathname: "/(tabs)/home",
+                pathname: "/(tabs)/myorders",
                 params: { orderId: result.data._id },
               }),
           },

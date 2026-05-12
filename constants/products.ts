@@ -15,6 +15,7 @@ export interface Product {
   warranty: string;
   stockQuantity: number;
   minOrderQuantity: number;
+  maxOrderQuantity?: number; // ✅ NEW
   description: string;
   images: {
     url: string;

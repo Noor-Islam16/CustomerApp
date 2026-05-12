@@ -11,8 +11,11 @@ const FontContext = createContext<FontContextType>({ fontsLoaded: false });
 
 export function FontProvider({ children }: { children: ReactNode }) {
   const [fontsLoaded] = useFonts({
-    "Exotc-Regular": require("@/assets/fonts/exotic.ttf"),
     "Exotc-Bold": require("@/assets/fonts/Exotc350BdBTBold.ttf"),
+    "VivoSans-Regular": require("@/assets/fonts/vivoSansGlobal-Regular.ttf"),
+    "VivoSans-Medium": require("@/assets/fonts/vivoSansGlobal-Medium.ttf"),
+    "VivoSans-Semibold": require("@/assets/fonts/vivoSansGlobal-Demibold.ttf"),
+    "VivoSans-Bold": require("@/assets/fonts/vivoSansGlobal-Bold.ttf"),
   });
 
   return (
@@ -26,9 +29,31 @@ export function useFont() {
   return useContext(FontContext);
 }
 
-const BOLD_WEIGHTS = new Set(["600", "700", "800", "900", "bold", "semibold"]);
+const VIVO_SEMIBOLD_WEIGHTS = new Set(["600", "semibold"]);
+const VIVO_MEDIUM_WEIGHTS = new Set(["500"]);
+const BOLD_WEIGHTS = new Set(["700", "800", "900", "bold"]);
 
-export function Text({ style, children, ...props }: TextProps) {
+type BoldVariant = "vivo" | "exotc"; // only matters at 700+
+
+interface CustomTextProps extends TextProps {
+  boldVariant?: BoldVariant;
+}
+
+function resolveFontFamily(weight: string, boldVariant: BoldVariant): string {
+  if (BOLD_WEIGHTS.has(weight)) {
+    return boldVariant === "vivo" ? "VivoSans-Bold" : "Exotc-Bold";
+  }
+  if (VIVO_SEMIBOLD_WEIGHTS.has(weight)) return "VivoSans-Semibold";
+  if (VIVO_MEDIUM_WEIGHTS.has(weight)) return "VivoSans-Medium";
+  return "VivoSans-Regular";
+}
+
+export function Text({
+  style,
+  children,
+  boldVariant = "vivo",
+  ...props
+}: CustomTextProps) {
   const { fontsLoaded } = useFont();
 
   if (!fontsLoaded) {
@@ -41,7 +66,7 @@ export function Text({ style, children, ...props }: TextProps) {
 
   const flatStyle = StyleSheet.flatten(style) as TextStyle | undefined;
   const weight = String(flatStyle?.fontWeight ?? "normal");
-  const fontFamily = BOLD_WEIGHTS.has(weight) ? "Exotc-Bold" : "Exotc-Regular";
+  const fontFamily = resolveFontFamily(weight, boldVariant);
 
   return (
     <RNText
@@ -49,7 +74,9 @@ export function Text({ style, children, ...props }: TextProps) {
         flatStyle,
         {
           fontFamily,
-          fontWeight: "normal", // prevent RN from doing a second font lookup
+          fontWeight: "normal",
+          includeFontPadding: false, // ← add this globally
+          textAlignVertical: "center", // ← fixes vertical alignment in row layouts
         },
       ]}
       {...props}

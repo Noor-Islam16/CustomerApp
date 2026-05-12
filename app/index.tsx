@@ -1,11 +1,12 @@
 import { Text } from "@/context/FontContext";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  BackHandler,
   Dimensions,
   Image,
   KeyboardAvoidingView,
@@ -135,6 +136,7 @@ const LoginScreen: React.FC = () => {
   const pincodeRef = useRef<TextInput>(null);
   const gstRef = useRef<TextInput>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const backHandlerRef = useRef<any>(null);
 
   // ── Animations ──
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -144,6 +146,40 @@ const LoginScreen: React.FC = () => {
   const cardFadeAnim = useRef(new Animated.Value(0)).current;
   const successScale = useRef(new Animated.Value(0.7)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
+
+  // ── Handle hardware back button ──────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (screen === "otp") {
+          setScreen("phone");
+          setOtp(Array(OTP_LENGTH).fill(""));
+          setError("");
+          return true;
+        } else if (screen === "profile") {
+          setScreen("otp");
+          setError("");
+          return true;
+        } else {
+          // On the main phone screen - exit the app
+          BackHandler.exitApp();
+          return true;
+        }
+      };
+
+      // Use the subscription object properly
+      backHandlerRef.current = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress,
+      );
+
+      return () => {
+        if (backHandlerRef.current) {
+          backHandlerRef.current.remove();
+        }
+      };
+    }, [screen]),
+  );
 
   // ── Auto-login check ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -582,7 +618,7 @@ const LoginScreen: React.FC = () => {
               />
             </View>
             {/* <Text style={styles.appName}>Thump Beyond Limits</Text> */}
-            <Text style={styles.tagline}>
+            <Text style={styles.tagline} boldVariant="exotc">
               Electronic Accessories In Your Way.
             </Text>
           </Animated.View>
@@ -604,7 +640,7 @@ const LoginScreen: React.FC = () => {
             {screen === "phone" && (
               <>
                 <View style={styles.cardHeader}>
-                  <Text style={[styles.cardTitle]}>Welcome Back</Text>
+                  <Text style={styles.cardTitle}>Welcome Back</Text>
                   <Text style={styles.cardSubtitle}>
                     Sign in to continue to your account
                   </Text>
@@ -612,21 +648,26 @@ const LoginScreen: React.FC = () => {
 
                 <View style={styles.inputSection}>
                   <Text style={styles.inputLabel}>Mobile Number</Text>
-                  <View style={styles.phoneRow}>
-                    <View style={styles.countryBox}>
-                      <Text style={styles.countryFlag}>{COUNTRY.flag}</Text>
-                      <Text style={styles.countryDial}>{COUNTRY.dial}</Text>
-                      <Ionicons
-                        name="chevron-down"
-                        size={wp("3%")}
-                        color={Colors.textMuted}
-                      />
+                  <View style={styles.phoneInputCombined}>
+                    {/* Country Code Fixed Part */}
+                    <View style={styles.countryCodeFixed}>
+                      <Text style={styles.countryFlagFixed}>
+                        {COUNTRY.flag}
+                      </Text>
+                      <Text style={styles.countryDialFixed}>
+                        {COUNTRY.dial}
+                      </Text>
                     </View>
+
+                    {/* Separator */}
+                    <View style={styles.phoneSeparator} />
+
+                    {/* Phone Number Input */}
                     <TextInput
                       ref={phoneRef}
                       style={[
-                        styles.phoneInput,
-                        error ? styles.inputError : null,
+                        styles.phoneInputField,
+                        error ? styles.phoneInputError : null,
                       ]}
                       placeholder="Enter mobile number"
                       placeholderTextColor={Colors.textMuted}
@@ -781,7 +822,7 @@ const LoginScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 </View>
-
+                {/* 
                 <View style={styles.waHint}>
                   <MaterialCommunityIcons
                     name="whatsapp"
@@ -791,7 +832,7 @@ const LoginScreen: React.FC = () => {
                   <Text style={styles.waHintText}>
                     OTP sent via WhatsApp / SMS
                   </Text>
-                </View>
+                </View> */}
               </>
             )}
 
@@ -863,12 +904,6 @@ const LoginScreen: React.FC = () => {
                       },
                     ]}
                   >
-                    {/* <Feather
-                      name="phone"
-                      size={wp("4.5%")}
-                      color={Colors.primary}
-                      style={styles.profileInputIcon}
-                    /> */}
                     <Image
                       source={require("../assets/images/whatsapp-icon.png")}
                       style={[
@@ -1361,7 +1396,7 @@ const LoginScreen: React.FC = () => {
             )}
           </Animated.View>
 
-          <Text style={styles.footer}>Thump Beyond Limits © 2026</Text>
+          <Text style={styles.footer}>Thump Beyond Limits ©2026</Text>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1574,8 +1609,8 @@ const styles = StyleSheet.create({
     marginTop: hp("3%"),
     marginBottom: hp("3%"),
   },
-  logoContainer: { position: "relative", marginBottom: hp("2%") },
-  logoImage: { width: wp("32%"), height: wp("32%") },
+  logoContainer: { position: "relative", marginBottom: hp("0.5%") },
+  logoImage: { width: wp("72%"), height: wp("32%") },
   appName: {
     fontSize: wp("7%"),
     fontWeight: "800",
@@ -1583,10 +1618,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   tagline: {
-    fontSize: wp("3.6%"),
+    fontSize: wp("5.5%"),
     color: "rgba(255,255,255,0.9)",
     marginTop: hp("0.5%"),
-    fontWeight: "500",
+    fontWeight: "700",
+    marginBottom: hp("2.5%"),
   },
 
   card: {
@@ -1604,7 +1640,6 @@ const styles = StyleSheet.create({
   },
   cardHeader: { marginBottom: hp("2.5%") },
   cardTitle: {
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
     fontSize: wp("6%"),
     fontWeight: "800",
     color: Colors.textPrimary,
@@ -1615,11 +1650,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: wp("5.5%"),
   },
-  phoneHighlight: {
-    fontWeight: "700",
-    color: Colors.primary,
-    fontFamily: "Exotc350BdBTBold",
-  },
+  phoneHighlight: { fontWeight: "700", color: Colors.primary },
 
   inputSection: { marginBottom: hp("2%") },
   inputLabel: {
@@ -1628,6 +1659,48 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginBottom: hp("1%"),
     marginLeft: wp("1%"),
+  },
+  phoneInputCombined: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: wp("3.5%"),
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    overflow: "hidden",
+  },
+  countryCodeFixed: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: wp("3.5%"),
+    paddingVertical: hp("1.6%"),
+    backgroundColor: "rgba(0,0,0,0.03)",
+    gap: wp("1.5%"),
+  },
+  countryFlagFixed: {
+    fontSize: wp("5.5%"),
+  },
+  countryDialFixed: {
+    fontSize: wp("3.8%"),
+    fontWeight: "600",
+    color: Colors.textPrimary,
+  },
+  phoneSeparator: {
+    width: 1.5,
+    height: "60%",
+  },
+  phoneInputField: {
+    fontFamily: "VivoSans-Medium",
+    flex: 1,
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("1.6%"),
+    fontSize: wp("4.2%"),
+    fontWeight: "500",
+    color: Colors.textPrimary,
+    backgroundColor: "transparent",
+  },
+  phoneInputError: {
+    backgroundColor: "#FFF5F5",
   },
   phoneRow: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   countryBox: {
@@ -1648,6 +1721,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   phoneInput: {
+    fontFamily: "Exotc-Bold",
     flex: 1,
     backgroundColor: Colors.surfaceAlt,
     borderRadius: wp("3.5%"),
@@ -1658,7 +1732,6 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   inputError: { borderColor: Colors.error, backgroundColor: "#FFF5F5" },
 
@@ -1673,6 +1746,7 @@ const styles = StyleSheet.create({
     aspectRatio: 0.85,
     backgroundColor: Colors.otpBox,
     borderRadius: wp("3.5%"),
+    fontFamily: "Exotc-Bold",
     fontSize: wp("6.5%"),
     fontWeight: "700",
     color: Colors.textPrimary,
@@ -1680,7 +1754,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     textAlign: "center",
     elevation: 2,
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   otpBoxFilled: {
     borderColor: Colors.primary,
@@ -1722,7 +1795,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.textOnPrimary,
     letterSpacing: 0.5,
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
 
   legalNote: {
@@ -1773,12 +1845,12 @@ const styles = StyleSheet.create({
   },
   profileInputIcon: { marginRight: wp("2.5%") },
   profileInput: {
+    fontFamily: "VivoSans-Medium",
     flex: 1,
     paddingVertical: hp("1.6%"),
     fontSize: wp("3.8%"),
     color: Colors.textPrimary,
     fontWeight: "500",
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   fieldErrorText: {
     fontSize: wp("3%"),
@@ -1927,7 +1999,6 @@ const styles = StyleSheet.create({
     paddingVertical: hp("1.4%"),
     fontSize: wp("3.8%"),
     color: Colors.textPrimary,
-    fontFamily: "Exotc350BdBTBold", // ✅ Added
   },
   dropdownList: { paddingHorizontal: wp("5%"), paddingVertical: hp("1%") },
   dropdownItem: {

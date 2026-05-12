@@ -1,9 +1,10 @@
 // tabs/_layout.tsx
+import { useApproval } from "@/context/ApprovalContext";
+import { Text, useFont } from "@/context/FontContext";
 import { Ionicons } from "@expo/vector-icons";
-import { useFonts } from "expo-font";
-import { Tabs } from "expo-router";
-import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Tabs, useFocusEffect } from "expo-router";
+import React, { useCallback } from "react";
+import { TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Tab configuration
@@ -28,23 +29,33 @@ const tabConfig = [
   },
 ];
 
-// Custom Tab Bar Component with Safe Area Handling
+/**
+ * Invisible component — renders nothing.
+ * Fires checkApprovalStatus whenever the tab navigator gains focus
+ * (tab switch, app foreground, back navigation into tabs).
+ * Identical pattern to how HomeScreen refreshes notification badge on focus.
+ */
+function ApprovalCheckOnTabFocus() {
+  const { checkApprovalStatus } = useApproval();
+
+  useFocusEffect(
+    useCallback(() => {
+      checkApprovalStatus();
+    }, [checkApprovalStatus]),
+  );
+
+  return null;
+}
+
 const CustomTabBar = ({ state, descriptors, navigation }: any) => {
   const insets = useSafeAreaInsets();
+  const { fontsLoaded } = useFont();
 
-  // Get font loaded state - you can pass this as a prop
-  const [fontsLoaded] = useFonts({
-    Exotc350BdBTBold: require("@/assets/fonts/exotic.ttf"),
-  });
-
-  // Calculate dynamic bottom padding based on system navigation bar
   const systemNavHeight = insets.bottom;
   const tabBarHeight = 60;
   const totalHeight = tabBarHeight + systemNavHeight;
 
-  if (!fontsLoaded) {
-    return null; // Or a loading placeholder
-  }
+  if (!fontsLoaded) return null;
 
   return (
     <View
@@ -57,7 +68,6 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
         backgroundColor: "#FFFFFF",
       }}
     >
-      {/* Tab Bar Content Container */}
       <View
         style={{
           flexDirection: "row",
@@ -80,17 +90,13 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
               target: route.key,
               canPreventDefault: true,
             });
-
             if (!isFocused && !event.defaultPrevented) {
               navigation.navigate(route.name);
             }
           };
 
           const onLongPress = () => {
-            navigation.emit({
-              type: "tabLongPress",
-              target: route.key,
-            });
+            navigation.emit({ type: "tabLongPress", target: route.key });
           };
 
           const tab = tabConfig.find((t) => t.name === route.name);
@@ -117,13 +123,7 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
               }}
               activeOpacity={0.7}
             >
-              <View
-                style={{
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {/* Icon Container */}
+              <View style={{ alignItems: "center", justifyContent: "center" }}>
                 <View
                   style={{
                     width: 48,
@@ -140,12 +140,10 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
                   />
                 </View>
 
-                {/* Label with custom font */}
                 <Text
                   style={{
                     fontSize: 11,
-                    fontFamily: "Exotc350BdBTBold", // ✅ Added custom font
-                    fontWeight: isFocused ? "600" : "400",
+                    fontWeight: isFocused ? "600" : "500",
                     color: textColor,
                     textAlign: "center",
                   }}
@@ -158,46 +156,36 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
         })}
       </View>
 
-      {/* System Navigation Bar Spacer */}
       {systemNavHeight > 0 && (
-        <View
-          style={{
-            height: systemNavHeight,
-            backgroundColor: "#FFFFFF",
-          }}
-        />
+        <View style={{ height: systemNavHeight, backgroundColor: "#FFFFFF" }} />
       )}
     </View>
   );
 };
 
-// Main Tab Layout
 export default function TabsLayout() {
   return (
-    <Tabs
-      tabBar={(props: any) => <CustomTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-      }}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          tabBarAccessibilityLabel: "Home Tab",
-        }}
-      />
-      <Tabs.Screen
-        name="myorders"
-        options={{
-          tabBarAccessibilityLabel: "My Orders Tab",
-        }}
-      />
-      <Tabs.Screen
-        name="account"
-        options={{
-          tabBarAccessibilityLabel: "Account Tab",
-        }}
-      />
-    </Tabs>
+    <>
+      {/* Fires checkApprovalStatus on every tab focus / tab switch */}
+      <ApprovalCheckOnTabFocus />
+
+      <Tabs
+        tabBar={(props: any) => <CustomTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
+      >
+        <Tabs.Screen
+          name="home"
+          options={{ tabBarAccessibilityLabel: "Home Tab" }}
+        />
+        <Tabs.Screen
+          name="myorders"
+          options={{ tabBarAccessibilityLabel: "My Orders Tab" }}
+        />
+        <Tabs.Screen
+          name="account"
+          options={{ tabBarAccessibilityLabel: "Account Tab" }}
+        />
+      </Tabs>
+    </>
   );
 }

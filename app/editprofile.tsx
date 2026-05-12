@@ -920,6 +920,7 @@ const styles = StyleSheet.create({
 
   // Input
   input: {
+    fontFamily: "Exotc350BdBTBold",
     width: "100%",
     minHeight: hp("6.2%"),
     borderRadius: wp("2.8%"),

@@ -5,6 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useRef } from "react";
 import {
+  Alert,
   Animated,
   Image,
   StyleSheet,
@@ -161,11 +162,47 @@ const ProductCard: React.FC<ProductCardProps> = ({
     }).start();
 
   const handleAdd = () => {
+    // ✅ Check max order quantity
+    if (product.maxOrderQuantity && quantity >= product.maxOrderQuantity) {
+      Alert.alert(
+        "Maximum Limit Reached",
+        `You can order a maximum of ${product.maxOrderQuantity} units of this product.`,
+        [{ text: "OK" }],
+      );
+      return;
+    }
+
+    // ✅ Check stock
+    if (product.stockQuantity && quantity >= product.stockQuantity) {
+      Alert.alert(
+        "Stock Limit Reached",
+        `Only ${product.stockQuantity} units available in stock.`,
+        [{ text: "OK" }],
+      );
+      return;
+    }
+
     addToCart(product, 1);
   };
 
   const handleRemove = () => {
     if (quantity > 0) {
+      // ✅ Check min order quantity before removing
+      if (product.minOrderQuantity && quantity <= product.minOrderQuantity) {
+        Alert.alert(
+          "Minimum Order Required",
+          `Minimum order quantity for this product is ${product.minOrderQuantity} unit${product.minOrderQuantity > 1 ? "s" : ""}.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Remove Anyway",
+              style: "destructive",
+              onPress: () => updateQuantity(product.id, quantity - 1),
+            },
+          ],
+        );
+        return;
+      }
       updateQuantity(product.id, quantity - 1);
     }
   };
@@ -480,11 +517,25 @@ const ProductCard: React.FC<ProductCardProps> = ({
                     onPress={handleAdd}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     activeOpacity={0.7}
+                    // ✅ Disable plus button when max is reached
+                    disabled={Boolean(
+                      (product.maxOrderQuantity &&
+                        quantity >= product.maxOrderQuantity) ||
+                      (product.stockQuantity &&
+                        quantity >= product.stockQuantity),
+                    )}
                   >
                     <Feather
                       name="plus"
                       size={isList ? wp("3.8%") : wp("3.5%")}
-                      color={Colors.white}
+                      color={
+                        (product.maxOrderQuantity &&
+                          quantity >= product.maxOrderQuantity) ||
+                        (product.stockQuantity &&
+                          quantity >= product.stockQuantity)
+                          ? Colors.textMuted
+                          : Colors.white
+                      }
                     />
                   </TouchableOpacity>
                 </View>
@@ -509,6 +560,12 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 Min {product.minOrderQuantity} units
               </Text>
             )}
+            {/* Max Order Quantity Info */}
+            {/* {!isOutOfStock && product.maxOrderQuantity && (
+              <Text style={styles.maxOrderText}>
+                Max {product.maxOrderQuantity} units
+              </Text>
+            )} */}
 
             {/* Compatibility Info (List View) */}
             {isList &&
@@ -996,6 +1053,13 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontWeight: "500",
     marginTop: hp("0.5%"),
+  },
+
+  maxOrderText: {
+    fontSize: wp("2.4%"),
+    color: Colors.warning,
+    fontWeight: "500",
+    marginTop: hp("0.3%"),
   },
 
   // Compatibility Row (List View)

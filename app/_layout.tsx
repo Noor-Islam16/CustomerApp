@@ -1,4 +1,5 @@
-// app/_layout.tsx
+import ApprovalModal from "@/components/ApprovalModal";
+import { ApprovalProvider, useApproval } from "@/context/ApprovalContext";
 import { CartProvider } from "@/context/CartContext";
 import { FontProvider } from "@/context/FontContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -21,8 +22,19 @@ export const unstable_settings = {
   anchor: "(tabs)",
 };
 
-// Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
+
+function ApprovalModalWrapper() {
+  const { showApprovalModal, setShowApprovalModal, checkApprovalStatus } =
+    useApproval();
+
+  return (
+    <ApprovalModal
+      visible={showApprovalModal}
+      onClose={() => setShowApprovalModal(false)}
+    />
+  );
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -33,9 +45,7 @@ export default function RootLayout() {
   );
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
-  // Remove useFonts from here - it's now in FontProvider
   useEffect(() => {
-    // Small delay to ensure fonts are loaded
     setTimeout(() => {
       SplashScreen.hideAsync();
     }, 500);
@@ -60,12 +70,8 @@ export default function RootLayout() {
     checkInitialNotification();
 
     return () => {
-      if (notificationListener.current) {
-        notificationListener.current.remove();
-      }
-      if (responseListener.current) {
-        responseListener.current.remove();
-      }
+      if (notificationListener.current) notificationListener.current.remove();
+      if (responseListener.current) responseListener.current.remove();
     };
   }, []);
 
@@ -99,35 +105,45 @@ export default function RootLayout() {
 
   return (
     <FontProvider>
-      {" "}
-      {/* Add FontProvider at the root */}
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <CartProvider>
-          <Stack>
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="auth/login" options={{ headerShown: false }} />
-            <Stack.Screen name="signup" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="products" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="product/[id]"
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen name="cart" options={{ headerShown: false }} />
-            <Stack.Screen name="checkout" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="notifications"
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen name="privacy" options={{ headerShown: false }} />
-            <Stack.Screen name="editprofile" options={{ headerShown: false }} />
-            <Stack.Screen name="bestsellers" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="limitedstocks"
-              options={{ headerShown: false }}
-            />
-          </Stack>
-        </CartProvider>
+        <ApprovalProvider>
+          <CartProvider>
+            <Stack>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="auth/login"
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen name="signup" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="products" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="product/[id]"
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen name="cart" options={{ headerShown: false }} />
+              <Stack.Screen name="checkout" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="notifications"
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen name="privacy" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="editprofile"
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="bestsellers"
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="limitedstocks"
+                options={{ headerShown: false }}
+              />
+            </Stack>
+            <ApprovalModalWrapper />
+          </CartProvider>
+        </ApprovalProvider>
       </ThemeProvider>
       <StatusBar style="dark" />
     </FontProvider>

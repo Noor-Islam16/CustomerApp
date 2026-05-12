@@ -2,10 +2,11 @@
 import { Text } from "@/context/FontContext";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Image,
   Platform,
@@ -26,7 +27,7 @@ import ProductCard from "../../components/ProductCard";
 import Colors from "../../constants/colors";
 import { CATEGORIES, Product } from "../../constants/products";
 import { useCart } from "../../context/CartContext";
-import { apiGetMe } from "../services/api";
+import { apiGetMe, apiGetNotifications } from "../services/api";
 import { ApiProduct, fetchAllProducts } from "../services/productApi";
 
 const TAB_BAR_HEIGHT = 60;
@@ -50,6 +51,7 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
     warranty: apiProduct.warranty || "No Warranty",
     stockQuantity: apiProduct.stockQuantity,
     minOrderQuantity: apiProduct.minOrderQuantity,
+    maxOrderQuantity: apiProduct.maxOrderQuantity,
     description: apiProduct.description || "",
     images: apiProduct.images || [],
     specifications: apiProduct.specifications || {},
@@ -76,11 +78,46 @@ const HomeScreen: React.FC = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Notification badge count
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+
   const minOrderThreshold = 500;
   const remaining = minOrderThreshold - cartTotal;
   const showMinOrderWarning = cartTotal > 0 && cartTotal < minOrderThreshold;
   const systemNavHeight = insets.bottom;
   const tabBarTotalHeight = TAB_BAR_HEIGHT + systemNavHeight;
+
+  // ── Handle hardware back button for home screen ──────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        // On home screen, exit the app
+        BackHandler.exitApp();
+        return true;
+      };
+
+      const backHandler = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress,
+      );
+
+      return () => {
+        backHandler.remove();
+      };
+    }, []),
+  );
+
+  // ── Fetch unread notification count ────────────────────────────────────────
+  const fetchUnreadNotificationCount = useCallback(async () => {
+    try {
+      const res = await apiGetNotifications({ limit: 1 });
+      if (res.success && res.data) {
+        setUnreadNotificationCount(res.data.unreadCount || 0);
+      }
+    } catch (error) {
+      console.error("Failed to fetch notification count:", error);
+    }
+  }, []);
 
   // ── Fetch All Data ─────────────────────────────────────────────────────────
   const fetchAllData = useCallback(async () => {
@@ -107,15 +144,31 @@ const HomeScreen: React.FC = () => {
       } finally {
         setIsLoadingProducts(false);
       }
+
+      // ✅ Fetch notification count
+      await fetchUnreadNotificationCount();
     } catch (err) {
       console.error("❌ Error fetching data:", err);
       setError("Something went wrong. Pull to retry.");
     }
-  }, []);
+  }, [fetchUnreadNotificationCount]);
 
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
+
+  // ✅ Refresh notification count on screen focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnreadNotificationCount();
+    }, [fetchUnreadNotificationCount]),
+  );
+
+  // ✅ Refresh notification count every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchUnreadNotificationCount, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadNotificationCount]);
 
   // ── Filter products ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -294,15 +347,23 @@ const HomeScreen: React.FC = () => {
             </TouchableOpacity>
 
             <View style={styles.headerActions}>
+              {/* ✅ Notification Bell with LIVE count */}
               <TouchableOpacity
                 style={styles.iconButton}
                 onPress={() => router.push("/notifications")}
               >
                 <Feather name="bell" size={wp("5.5%")} color={Colors.white} />
-                <View style={styles.notificationBadge}>
-                  <Text style={styles.badgeText}>3</Text>
-                </View>
+                {unreadNotificationCount > 0 && (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.badgeText}>
+                      {unreadNotificationCount > 99
+                        ? "99+"
+                        : unreadNotificationCount}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
+              {/* Cart */}
               <TouchableOpacity
                 style={styles.iconButton}
                 onPress={() => router.push("/cart")}
@@ -347,7 +408,10 @@ const HomeScreen: React.FC = () => {
         <View style={styles.pageBody}>
           {/* Categories */}
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { marginBottom: hp("1.5%") }]}>
+            <Text
+              style={[styles.sectionTitle, { marginBottom: hp("1.5%") }]}
+              boldVariant="exotc"
+            >
               Shop by Category
             </Text>
             <ScrollView
@@ -508,7 +572,9 @@ const HomeScreen: React.FC = () => {
             allProductsForHorizontal.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.productHeader}>
-                  <Text style={styles.sectionTitle}>All Products</Text>
+                  <Text style={styles.sectionTitle} boldVariant="exotc">
+                    All Products
+                  </Text>
                   <TouchableOpacity
                     style={styles.viewAllBtn}
                     onPress={() => router.push("/products")}
@@ -675,12 +741,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.8)",
   },
-  greeting: { fontSize: wp("3%"), color: "rgba(255,255,255,0.88)" },
-  userName: {
-    fontSize: wp("4.2%"),
-    fontWeight: "700",
-    color: Colors.white,
+  greeting: {
+    fontSize: wp("3%"),
+    color: "rgba(255,255,255,0.88)",
+    fontWeight: "600",
   },
+  userName: { fontSize: wp("4.2%"), fontWeight: "700", color: Colors.white },
   headerActions: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   iconButton: { position: "relative", padding: wp("1.5%") },
   notificationBadge: {
@@ -688,13 +754,14 @@ const styles = StyleSheet.create({
     top: 0,
     right: 0,
     backgroundColor: Colors.error,
-    width: wp("4%"),
-    height: wp("4%"),
-    borderRadius: wp("2%"),
+    minWidth: wp("4.5%"),
+    height: wp("4.5%"),
+    borderRadius: wp("2.25%"),
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
     borderColor: Colors.white,
+    paddingHorizontal: 2,
   },
   cartBadge: {
     position: "absolute",

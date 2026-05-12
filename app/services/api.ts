@@ -323,6 +323,7 @@ export interface ApiProduct {
   warranty?: string;
   stockQuantity: number;
   minOrderQuantity: number;
+  maxOrderQuantity?: number;
   description?: string;
   specifications?: Record<string, string>;
   images: ProductImage[];

@@ -485,7 +485,7 @@ const CartScreen: React.FC = () => {
         </View>
 
         {/* Delivery Tip */}
-        <View style={styles.tipSection}>
+        {/* <View style={styles.tipSection}>
           <Text style={styles.sectionTitle}>Delivery Tip</Text>
           <Text style={styles.tipSubtitle}>Support your delivery partner</Text>
 
@@ -510,7 +510,7 @@ const CartScreen: React.FC = () => {
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </View> */}
       </ScrollView>
 
       {/* Bottom Checkout Bar */}
