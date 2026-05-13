@@ -29,7 +29,8 @@ import { useCart } from "../../context/CartContext";
 import { ApiProduct, fetchProducts } from "../services/productApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const BASE_URL = "https://customer-7bcb.onrender.com";
+// const BASE_URL = "https://customer-7bcb.onrender.com";
+export const BASE_URL = "http://10.64.32.75:5000";
 
 // Map API product to app Product format
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {

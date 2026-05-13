@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "716649952111",
+    "project_id": "thump-cf668",
+    "storage_bucket": "thump-cf668.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:716649952111:android:2aad6ccea415d5e44eee9a",
+        "android_client_info": {
+          "package_name": "com.asrtech123.Thump"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBtm1_93IPkxLFN_GLqQZfMIlKp4jQK-Wc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

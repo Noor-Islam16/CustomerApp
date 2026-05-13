@@ -3,30 +3,36 @@ import { ApprovalProvider, useApproval } from "@/context/ApprovalContext";
 import { CartProvider } from "@/context/CartContext";
 import { FontProvider } from "@/context/FontContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import messaging from "@react-native-firebase/messaging";
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import * as Notifications from "expo-notifications";
 import { SplashScreen, Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import "react-native-reanimated";
 import {
   addNotificationResponseReceivedListener,
+  checkInitialFCMNotification,
   registerForPushNotificationsAsync,
+  setupForegroundMessageHandler,
 } from "./services/notifications";
 
 export const unstable_settings = {
   anchor: "(tabs)",
 };
 
+// ── Must be outside component tree ──────────────────────────────────────────
+messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+  console.log("📬 FCM background message:", remoteMessage.data);
+});
+
 SplashScreen.preventAutoHideAsync();
 
 function ApprovalModalWrapper() {
-  const { showApprovalModal, setShowApprovalModal, checkApprovalStatus } =
-    useApproval();
+  const { showApprovalModal, setShowApprovalModal } = useApproval();
 
   return (
     <ApprovalModal
@@ -39,11 +45,8 @@ function ApprovalModalWrapper() {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-  const [notification, setNotification] = useState<any>(null);
-  const notificationListener = useRef<Notifications.EventSubscription | null>(
-    null,
-  );
-  const responseListener = useRef<Notifications.EventSubscription | null>(null);
+  const foregroundUnsub = useRef<(() => void) | null>(null);
+  const backgroundSub = useRef<{ remove: () => void } | null>(null);
 
   useEffect(() => {
     setTimeout(() => {
@@ -52,56 +55,38 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    // Register device and save FCM token to backend
     registerForPushNotificationsAsync();
 
-    notificationListener.current =
-      Notifications.addNotificationReceivedListener((notif) => {
-        console.log("📬 Notification received in foreground:", notif);
-        setNotification(notif);
-      });
+    // Foreground: app is open, message arrives
+    foregroundUnsub.current = setupForegroundMessageHandler((message) => {
+      console.log(
+        "📬 FCM foreground message:",
+        message.notification?.title,
+        message.data,
+      );
+      // FCM won't auto-display when app is open
+      // Add notifee here if you want foreground banners
+    });
 
-    responseListener.current = addNotificationResponseReceivedListener(
+    // Background: app was in background, user tapped notification
+    backgroundSub.current = addNotificationResponseReceivedListener(
       (screen) => {
         console.log("🧭 Navigating to:", screen);
         router.push(screen as any);
       },
     );
 
-    checkInitialNotification();
+    // Quit state: app was fully closed, user tapped notification
+    checkInitialFCMNotification((screen) => {
+      router.push(screen as any);
+    });
 
     return () => {
-      if (notificationListener.current) notificationListener.current.remove();
-      if (responseListener.current) responseListener.current.remove();
+      foregroundUnsub.current?.();
+      backgroundSub.current?.remove();
     };
   }, []);
-
-  const checkInitialNotification = async () => {
-    try {
-      const response = await Notifications.getLastNotificationResponseAsync();
-      if (response) {
-        const data = response.notification.request.content.data;
-        console.log("🚀 App opened from notification:", data);
-
-        if (data?.type === "approval_status") {
-          setTimeout(() => {
-            if (data.status === "approved") {
-              router.push("/(tabs)/home" as any);
-            } else {
-              router.push("/(tabs)/account" as any);
-            }
-          }, 1000);
-        }
-
-        if (data?.type === "order_status_update" && data?.orderId) {
-          setTimeout(() => {
-            router.push(`/(tabs)/myorders?orderId=${data.orderId}` as any);
-          }, 1000);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to check initial notification:", error);
-    }
-  };
 
   return (
     <FontProvider>

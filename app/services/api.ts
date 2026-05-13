@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const BASE_URL = "https://customer-7bcb.onrender.com";
-// export const BASE_URL = "http://10.64.32.75:5000";
+// export const BASE_URL = "https://customer-7bcb.onrender.com";
+export const BASE_URL = "http://10.64.32.75:5000";
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 export const saveToken = async (token: string) => {

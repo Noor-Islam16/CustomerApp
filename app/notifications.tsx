@@ -23,8 +23,8 @@ import {
 import Colors from "../constants/colors";
 
 // ─── API Base URL (same as your api.ts) ──────────────────────────────────────
-export const BASE_URL = "https://customer-7bcb.onrender.com";
-// export const BASE_URL = "http://10.64.32.75:5000";
+// export const BASE_URL = "https://customer-7bcb.onrender.com";
+export const BASE_URL = "http://10.64.32.75:5000";
 
 // ─── Notification Types ──────────────────────────────────────────────────────
 export interface ApiNotification {
