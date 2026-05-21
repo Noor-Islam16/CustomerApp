@@ -3,11 +3,11 @@ import { Text } from "@/context/FontContext";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   BackHandler,
-  FlatList,
   Image,
   Platform,
   RefreshControl,
@@ -44,6 +44,7 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
     compatibility: apiProduct.compatibility || [],
     sellingPrice: apiProduct.sellingPrice,
     originalPrice: apiProduct.originalPrice || apiProduct.sellingPrice * 1.2,
+    enforceOrderLimits: apiProduct.enforceOrderLimits !== false, // default true
     color: apiProduct.color || "",
     material: apiProduct.material || "",
     dimensions: apiProduct.dimensions || "",
@@ -80,6 +81,17 @@ const HomeScreen: React.FC = () => {
 
   // ✅ Notification badge count
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+
+  // ✅ Auto-refresh & polling states
+  const [lastProductUpdate, setLastProductUpdate] = useState<number>(
+    Date.now(),
+  );
+  const [isPolling, setIsPolling] = useState(false);
+  const [showNewProductsBanner, setShowNewProductsBanner] = useState(false);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const minOrderThreshold = 500;
   const remaining = minOrderThreshold - cartTotal;
@@ -118,6 +130,52 @@ const HomeScreen: React.FC = () => {
       console.error("Failed to fetch notification count:", error);
     }
   }, []);
+
+  // ── Poll for new products ──────────────────────────────────────────────────
+  const checkForNewProducts = useCallback(async () => {
+    if (isPolling) return; // Prevent overlapping requests
+
+    try {
+      setIsPolling(true);
+      const apiProducts = await fetchAllProducts();
+
+      // Check if we have new products or changes
+      const hasNewProducts = apiProducts.length !== allProducts.length;
+      const hasChanges = apiProducts.some((newProduct) => {
+        const existingProduct = allProducts.find(
+          (p) => p.id === newProduct._id,
+        );
+        return (
+          !existingProduct ||
+          existingProduct.stockQuantity !== newProduct.stockQuantity ||
+          existingProduct.sellingPrice !== newProduct.sellingPrice
+        );
+      });
+
+      if (hasNewProducts || hasChanges) {
+        console.log("🔄 New products or changes detected, updating...");
+        const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
+        setAllProducts(mappedProducts);
+        setLastProductUpdate(Date.now());
+
+        // Show new products banner (not on initial load)
+        if (allProducts.length > 0) {
+          setShowNewProductsBanner(true);
+          // Clear existing timeout if any
+          if (bannerTimeoutRef.current) {
+            clearTimeout(bannerTimeoutRef.current);
+          }
+          bannerTimeoutRef.current = setTimeout(() => {
+            setShowNewProductsBanner(false);
+          }, 5000);
+        }
+      }
+    } catch (error) {
+      console.error("Polling error:", error);
+    } finally {
+      setIsPolling(false);
+    }
+  }, [allProducts, isPolling]);
 
   // ── Fetch All Data ─────────────────────────────────────────────────────────
   const fetchAllData = useCallback(async () => {
@@ -164,11 +222,83 @@ const HomeScreen: React.FC = () => {
     }, [fetchUnreadNotificationCount]),
   );
 
+  // ── Refresh data when screen comes into focus ──────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh user data silently
+      const refreshUserData = async () => {
+        try {
+          const userResponse = await apiGetMe();
+          if (userResponse.success) {
+            setUserData(userResponse.user);
+          }
+        } catch (error) {
+          console.error("Failed to refresh user data:", error);
+        }
+      };
+
+      // Refresh products silently
+      const refreshProducts = async () => {
+        try {
+          const apiProducts = await fetchAllProducts();
+          const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
+          setAllProducts(mappedProducts);
+          setLastProductUpdate(Date.now());
+        } catch (error) {
+          console.error("Failed to refresh products:", error);
+        }
+      };
+
+      // Only refresh if data was loaded previously
+      if (!isLoadingProducts && allProducts.length > 0) {
+        refreshUserData();
+        refreshProducts();
+      }
+
+      // Refresh notification count
+      fetchUnreadNotificationCount();
+    }, [isLoadingProducts, allProducts.length, fetchUnreadNotificationCount]),
+  );
+
   // ✅ Refresh notification count every 30 seconds
   useEffect(() => {
     const interval = setInterval(fetchUnreadNotificationCount, 30000);
     return () => clearInterval(interval);
   }, [fetchUnreadNotificationCount]);
+
+  // ── Set up polling interval (every 30 seconds) ──────────────────────────────
+  useEffect(() => {
+    // Start polling after initial load
+    if (!isLoadingProducts) {
+      pollingIntervalRef.current = setInterval(() => {
+        checkForNewProducts();
+      }, 30000); // Poll every 30 seconds
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+      }
+    };
+  }, [isLoadingProducts, checkForNewProducts]);
+
+  // ── App State Change Listener (refresh when app comes to foreground) ────────
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active" && !isLoadingProducts) {
+        console.log("📱 App came to foreground, refreshing data...");
+        checkForNewProducts();
+        fetchUnreadNotificationCount();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isLoadingProducts, checkForNewProducts, fetchUnreadNotificationCount]);
 
   // ── Filter products ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -204,7 +334,7 @@ const HomeScreen: React.FC = () => {
   const newArrivalProducts = allProducts
     .filter((p) => p.tags.includes("New Arrival") && p.inStock)
     .slice(0, 6);
-  const allProductsForHorizontal = allProducts
+  const allProductsForDisplay = allProducts
     .filter((p) => p.inStock)
     .slice(0, 6);
 
@@ -225,6 +355,7 @@ const HomeScreen: React.FC = () => {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAllData();
+    setShowNewProductsBanner(false); // Hide banner on manual refresh
     setRefreshing(false);
   }, [fetchAllData]);
 
@@ -292,6 +423,44 @@ const HomeScreen: React.FC = () => {
     );
   }
 
+  // ── Render product grid section ──────────────────────────────────────────
+  const renderProductGrid = (
+    products: Product[],
+    title: string,
+    showViewAll = true,
+  ) => {
+    if (products.length === 0) return null;
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.productHeader}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {showViewAll && (
+            <TouchableOpacity
+              style={styles.viewAllBtn}
+              onPress={() => router.push("/products")}
+            >
+              <Text style={styles.viewAllText}>View All</Text>
+              <Feather
+                name="chevron-right"
+                size={wp("4%")}
+                style={{ marginBottom: wp("0.5%") }}
+                color={Colors.primary}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.gridRow}>
+          {products.map((product) => (
+            <View key={product.id} style={styles.gridCardWrapper}>
+              <ProductCard product={product} />
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.root}>
       <StatusBar
@@ -327,7 +496,7 @@ const HomeScreen: React.FC = () => {
             styles.headerGradient,
             {
               paddingTop:
-                insets.top || (Platform.OS === "ios" ? hp("6%") : hp("4%")),
+                insets.top || (Platform.OS === "ios" ? hp("6%") : hp("6%")),
             },
           ]}
         >
@@ -339,7 +508,9 @@ const HomeScreen: React.FC = () => {
             >
               <Image source={{ uri: getUserAvatar() }} style={styles.avatar} />
               <View style={styles.userInfo}>
-                <Text style={styles.greeting}>{getGreeting()} 👋</Text>
+                <Text style={styles.greeting} numberOfLines={1}>
+                  {getGreeting()} 👋
+                </Text>
                 <Text style={styles.userName} numberOfLines={1}>
                   {getUserDisplayName()}
                 </Text>
@@ -404,6 +575,23 @@ const HomeScreen: React.FC = () => {
           </View>
         </LinearGradient>
 
+        {/* New Products Banner */}
+        {showNewProductsBanner && (
+          <View style={styles.newProductsBanner}>
+            <MaterialCommunityIcons
+              name="package-variant-plus"
+              size={wp("4.5%")}
+              color={Colors.white}
+            />
+            <Text style={styles.newProductsBannerText}>
+              New products added! Pull down to refresh
+            </Text>
+            <TouchableOpacity onPress={() => setShowNewProductsBanner(false)}>
+              <Feather name="x" size={wp("4%")} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ── Page Body ── */}
         <View style={styles.pageBody}>
           {/* Categories */}
@@ -449,7 +637,6 @@ const HomeScreen: React.FC = () => {
                         styles.categoryLabel,
                         isActive && styles.categoryLabelActive,
                       ]}
-                      numberOfLines={1}
                     >
                       {category.name}
                     </Text>
@@ -460,149 +647,8 @@ const HomeScreen: React.FC = () => {
             </ScrollView>
           </View>
 
-          {/* Featured */}
-          {featuredProducts.length > 0 &&
-            !isSearching &&
-            selectedCategory === "all" && (
-              <View style={styles.section}>
-                <View style={styles.productHeader}>
-                  <Text style={styles.sectionTitle}>Featured Products</Text>
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => router.push("/products")}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Feather
-                      name="chevron-right"
-                      size={wp("4%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalProductScroll}
-                >
-                  {featuredProducts.map((product) => (
-                    <View key={product.id} style={styles.horizontalProductCard}>
-                      <ProductCard product={product} hideTags={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-          {/* Best Sellers */}
-          {bestSellerProducts.length > 0 &&
-            !isSearching &&
-            selectedCategory === "all" && (
-              <View style={styles.section}>
-                <View style={styles.productHeader}>
-                  <Text style={styles.sectionTitle}>Best Sellers</Text>
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => router.push("/products")}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Feather
-                      name="chevron-right"
-                      size={wp("4%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalProductScroll}
-                >
-                  {bestSellerProducts.map((product) => (
-                    <View key={product.id} style={styles.horizontalProductCard}>
-                      <ProductCard product={product} hideTags={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-          {/* New Arrivals */}
-          {newArrivalProducts.length > 0 &&
-            !isSearching &&
-            selectedCategory === "all" && (
-              <View style={styles.section}>
-                <View style={styles.productHeader}>
-                  <View style={styles.titleWithIcon}>
-                    <MaterialCommunityIcons
-                      name="new-box"
-                      size={wp("5%")}
-                      color="#00A884"
-                    />
-                    <Text style={styles.sectionTitle}>New Arrivals</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => router.push("/products")}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Feather
-                      name="chevron-right"
-                      size={wp("4%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalProductScroll}
-                >
-                  {newArrivalProducts.map((product) => (
-                    <View key={product.id} style={styles.horizontalProductCard}>
-                      <ProductCard product={product} hideTags={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-          {/* All Products */}
-          {!isSearching &&
-            selectedCategory === "all" &&
-            allProductsForHorizontal.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.productHeader}>
-                  <Text style={styles.sectionTitle} boldVariant="exotc">
-                    All Products
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => router.push("/products")}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Feather
-                      name="chevron-right"
-                      size={wp("4%")}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalProductScroll}
-                >
-                  {allProductsForHorizontal.map((product) => (
-                    <View key={product.id} style={styles.horizontalProductCard}>
-                      <ProductCard product={product} hideTags={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-          {/* Category/Search Results Grid */}
-          {(isSearching || selectedCategory !== "all") && (
+          {/* Show grid layout when search is active or category is selected */}
+          {isSearching || selectedCategory !== "all" ? (
             <View style={styles.section}>
               <View style={styles.productHeader}>
                 <Text style={styles.sectionTitle}>
@@ -626,14 +672,13 @@ const HomeScreen: React.FC = () => {
                 )}
               </View>
               {filteredProducts.length > 0 ? (
-                <FlatList
-                  data={filteredProducts}
-                  keyExtractor={(item) => item.id}
-                  numColumns={2}
-                  scrollEnabled={false}
-                  columnWrapperStyle={styles.productRow}
-                  renderItem={({ item }) => <ProductCard product={item} />}
-                />
+                <View style={styles.gridRow}>
+                  {filteredProducts.map((item) => (
+                    <View key={item.id} style={styles.gridCardWrapper}>
+                      <ProductCard product={item} />
+                    </View>
+                  ))}
+                </View>
               ) : (
                 <View style={styles.emptyState}>
                   <MaterialCommunityIcons
@@ -648,6 +693,52 @@ const HomeScreen: React.FC = () => {
                 </View>
               )}
             </View>
+          ) : (
+            /* Show all sections in grid layout when on "all" category */
+            <>
+              {/* Featured Products Grid */}
+              {renderProductGrid(featuredProducts, "Featured Products")}
+
+              {/* Best Sellers Grid */}
+              {renderProductGrid(bestSellerProducts, "Best Sellers")}
+
+              {/* New Arrivals Grid */}
+              {newArrivalProducts.length > 0 && (
+                <View style={styles.section}>
+                  <View style={styles.productHeader}>
+                    <View style={styles.titleWithIcon}>
+                      <MaterialCommunityIcons
+                        name="new-box"
+                        size={wp("5%")}
+                        color="#00A884"
+                      />
+                      <Text style={styles.sectionTitle}>New Arrivals</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.viewAllBtn}
+                      onPress={() => router.push("/products")}
+                    >
+                      <Text style={styles.viewAllText}>View All</Text>
+                      <Feather
+                        name="chevron-right"
+                        size={wp("4%")}
+                        color={Colors.primary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.gridRow}>
+                    {newArrivalProducts.map((product) => (
+                      <View key={product.id} style={styles.gridCardWrapper}>
+                        <ProductCard product={product} />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* All Products Grid */}
+              {renderProductGrid(allProductsForDisplay, "All Products", true)}
+            </>
           )}
         </View>
       </ScrollView>
@@ -692,12 +783,14 @@ const HomeScreen: React.FC = () => {
               activeOpacity={0.9}
               onPress={() => router.push("/cart")}
             >
-              <Text style={styles.viewCartText}>View Cart</Text>
-              <Feather
-                name="arrow-right"
-                size={wp("4.5%")}
-                color={Colors.white}
-              />
+              <View style={styles.viewCartBtnContent}>
+                <Text style={styles.viewCartText}>View Cart</Text>
+                <Feather
+                  name="arrow-right"
+                  size={wp("4.5%")}
+                  color={Colors.white}
+                />
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -733,20 +826,34 @@ const styles = StyleSheet.create({
     gap: wp("3%"),
     flex: 1,
   },
-  userInfo: { flex: 1 },
+  userInfo: {
+    flex: 1,
+    justifyContent: "center",
+  },
   avatar: {
-    width: wp("11%"),
-    height: wp("11%"),
-    borderRadius: wp("5.5%"),
+    width: wp("12%"),
+    height: wp("12%"),
+    borderRadius: wp("6%"),
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.8)",
+    borderColor: "rgba(255,255,255,0.9)",
+    backgroundColor: Colors.primary,
   },
   greeting: {
-    fontSize: wp("3%"),
-    color: "rgba(255,255,255,0.88)",
+    fontSize: wp("3.8%"),
+    color: "rgba(255,255,255,0.9)",
     fontWeight: "600",
+    lineHeight: wp("5%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
-  userName: { fontSize: wp("4.2%"), fontWeight: "700", color: Colors.white },
+  userName: {
+    fontSize: wp("4.2%"),
+    fontWeight: "700",
+    color: Colors.white,
+    lineHeight: wp("5.2%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   headerActions: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   iconButton: { position: "relative", padding: wp("1.5%") },
   notificationBadge: {
@@ -776,7 +883,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.white,
   },
-  badgeText: { fontSize: wp("2.2%"), fontWeight: "800", color: Colors.white },
+  badgeText: {
+    fontSize: wp("2.2%"),
+    fontWeight: "800",
+    color: Colors.white,
+    lineHeight: wp("3.5%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -796,6 +910,30 @@ const styles = StyleSheet.create({
     fontSize: wp("3.5%"),
     color: Colors.textPrimary,
     height: "100%",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  newProductsBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2%"),
+    backgroundColor: Colors.success,
+    marginHorizontal: wp("4%"),
+    marginTop: hp("1%"),
+    borderRadius: wp("3%"),
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("1.2%"),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  newProductsBannerText: {
+    flex: 1,
+    fontSize: wp("3.2%"),
+    fontWeight: "600",
+    color: Colors.white,
   },
   pageBody: { backgroundColor: Colors.background, paddingTop: hp("2%") },
   section: { paddingHorizontal: wp("4%"), marginBottom: hp("2.5%") },
@@ -840,18 +978,26 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: hp("1.5%"),
   },
-  viewAllBtn: { flexDirection: "row", alignItems: "center", gap: wp("0.5%") },
+  viewAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   viewAllText: {
     fontSize: wp("3.2%"),
     fontWeight: "600",
     color: Colors.primary,
+    includeFontPadding: false,
+    marginRight: wp("0.5%"),
   },
-  horizontalProductScroll: { gap: wp("3%"), paddingRight: wp("4%") },
-  horizontalProductCard: { width: wp("40%") },
-  productRow: {
+  gridRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: hp("0.5%"),
-    alignItems: "stretch",
+  },
+  gridCardWrapper: {
+    width: "49%",
+    marginBottom: hp("1.5%"),
   },
   emptyState: {
     alignItems: "center",
@@ -963,6 +1109,9 @@ const styles = StyleSheet.create({
     fontSize: wp("2.2%"),
     fontWeight: "800",
     color: Colors.white,
+    lineHeight: wp("3.5%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   cartLabel: { fontSize: wp("2.8%"), color: Colors.textSecondary },
   cartTotal: {
@@ -975,19 +1124,25 @@ const styles = StyleSheet.create({
     borderRadius: wp("2.5%"),
     paddingHorizontal: wp("5%"),
     paddingVertical: hp("1.3%"),
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("2%"),
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 4,
   },
+  viewCartBtnContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: wp("2%"),
+  },
   viewCartText: {
+    top: hp("0.2%"),
     fontSize: wp("3.6%"),
     fontWeight: "700",
     color: Colors.white,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
 });
 

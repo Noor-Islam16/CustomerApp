@@ -1,165 +1,221 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import messaging, {
-  FirebaseMessagingTypes,
-} from "@react-native-firebase/messaging";
-import { Platform } from "react-native";
+import messaging from "@react-native-firebase/messaging";
+import * as Device from "expo-device";
+import { Alert, PermissionsAndroid, Platform } from "react-native";
 import { BASE_URL, getToken } from "./api";
 
-const FCM_TOKEN_KEY = "@fcm_push_token";
+const FCM_TOKEN_KEY = "@fcm_token";
 
-// ─── Register for Push Notifications ─────────────────────────────────────────
 export async function registerForPushNotificationsAsync(): Promise<
   string | null
 > {
   try {
-    // Request permission (iOS)
+    if (!Device.isDevice) {
+      Alert.alert("Error", "Must use physical device for push notifications");
+      return null;
+    }
+
+    if (Platform.OS === "android" && Platform.Version >= 33) {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        {
+          title: "Notification Permission",
+          message:
+            "Thump needs to send you notifications for order updates, offers, and important alerts.",
+          buttonPositive: "Allow",
+          buttonNegative: "Deny",
+        },
+      );
+
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.log("❌ Android notification permission denied");
+        return null;
+      }
+    }
+
     const authStatus = await messaging().requestPermission();
     const enabled =
       authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
     if (!enabled) {
-      console.log("❌ FCM permission denied");
+      console.log("❌ Push notification permission denied");
       return null;
     }
 
     // Get FCM token
-    const token = await messaging().getToken();
-    console.log("✅ FCM Token:", token);
+    const fcmToken = await messaging().getToken();
+    console.log("✅ FCM Token:", fcmToken);
 
-    await AsyncStorage.setItem(FCM_TOKEN_KEY, token);
-    await sendPushTokenToBackend(token);
-
-    // Android notification channel
-    if (Platform.OS === "android") {
-      const { default: notifee } = await import("@notifee/react-native").catch(
-        () => ({ default: null }),
-      );
-      // If you're not using notifee, skip — FCM handles channels on Android 8+
-      // via the manifest or firebase config
+    if (fcmToken) {
+      await AsyncStorage.setItem(FCM_TOKEN_KEY, fcmToken);
+      await sendFCMTokenToBackend(fcmToken);
     }
 
-    // Listen for token refresh
+    // Token refresh listener
     messaging().onTokenRefresh(async (newToken) => {
-      console.log("🔄 FCM token refreshed:", newToken);
+      console.log("🔄 FCM Token refreshed:", newToken);
       await AsyncStorage.setItem(FCM_TOKEN_KEY, newToken);
-      await sendPushTokenToBackend(newToken);
+      await sendFCMTokenToBackend(newToken);
     });
 
-    return token;
+    return fcmToken;
   } catch (error) {
-    console.error("❌ Error registering FCM:", error);
+    console.error("❌ Error registering push notifications:", error);
     return null;
   }
 }
 
-// ─── Send token to backend ────────────────────────────────────────────────────
-export async function sendPushTokenToBackend(token: string): Promise<void> {
+async function sendFCMTokenToBackend(token: string): Promise<void> {
   try {
     const authToken = await getToken();
     if (!authToken) {
-      console.log("⚠️ Not authenticated, skipping push token registration");
+      console.log("⚠️ Not authenticated, skipping FCM token registration");
       return;
     }
 
-    const response = await fetch(`${BASE_URL}/auth/push-token`, {
+    const response = await fetch(`${BASE_URL}/auth/fcm-token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({
-        pushToken: token,
+        fcmToken: token,
         platform: Platform.OS,
-        tokenType: "fcm",
+        device: Device.deviceName || "Unknown",
       }),
     });
 
     const data = await response.json();
-    console.log("📤 FCM token registered:", data.success ? "Yes" : "No");
+
+    if (data.success) {
+      console.log("📤 FCM token registered:", data.tokenCount, "devices");
+    } else {
+      console.error("❌ Failed to register FCM token:", data.message);
+    }
   } catch (error) {
     console.error("❌ Failed to send FCM token:", error);
   }
 }
 
-// ─── Navigation handler (shared) ─────────────────────────────────────────────
-function handleNavigation(
-  data: Record<string, any> | undefined,
-  navigationHandler: (screen: string) => void,
-) {
-  if (!data) return;
+export async function removeFCMTokenFromBackend(): Promise<void> {
+  try {
+    const token = await AsyncStorage.getItem(FCM_TOKEN_KEY);
+    const authToken = await getToken();
 
-  if (data.type === "approval_status") {
-    navigationHandler(
-      data.status === "approved" ? "/(tabs)/home" : "/(tabs)/account",
-    );
-    return;
-  }
-  if (data.type === "order_status_update" && data.orderId) {
-    navigationHandler(`/(tabs)/myorders?orderId=${data.orderId}`);
-    return;
-  }
-  if (data.screen) {
-    navigationHandler(data.screen);
+    if (!token || !authToken) return;
+
+    const response = await fetch(`${BASE_URL}/auth/fcm-token`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        fcmToken: token,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      console.log("🗑️ FCM token removed from backend");
+      await AsyncStorage.removeItem(FCM_TOKEN_KEY);
+    }
+  } catch (error) {
+    console.error("❌ Failed to remove FCM token:", error);
   }
 }
 
-// ─── Foreground message listener ─────────────────────────────────────────────
-// Call this once in your layout to handle messages while app is open
-export function setupForegroundMessageHandler(
-  onMessage?: (message: FirebaseMessagingTypes.RemoteMessage) => void,
-): () => void {
-  const unsubscribe = messaging().onMessage(async (remoteMessage) => {
-    console.log("📬 FCM foreground message:", remoteMessage.data);
-    onMessage?.(remoteMessage);
-    // FCM doesn't auto-display when app is open — show a local notification
-    // or update your in-app notification state here
+export async function getRegisteredDevices(): Promise<any[]> {
+  try {
+    const authToken = await getToken();
+    if (!authToken) return [];
+
+    const response = await fetch(`${BASE_URL}/auth/fcm-tokens`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      return data.fcmTokens || [];
+    }
+    return [];
+  } catch (error) {
+    console.error("❌ Failed to get FCM tokens:", error);
+    return [];
+  }
+}
+
+export function setupForegroundHandler() {
+  return messaging().onMessage(async (remoteMessage) => {
+    console.log("📬 Foreground message:", JSON.stringify(remoteMessage));
   });
+}
+
+export function setupBackgroundHandler() {
+  messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    console.log("📬 Background message:", JSON.stringify(remoteMessage));
+  });
+}
+
+export function addNotificationResponseReceivedListener(
+  navigationHandler: (screen: string) => void,
+): () => void {
+  // ✅ Only handles background → foreground taps
+  // Cold start (killed → tapped) is handled in index.tsx
+  const unsubscribe = messaging().onNotificationOpenedApp((remoteMessage) => {
+    console.log("🔔 Notification opened:", JSON.stringify(remoteMessage));
+    handleNavigation(remoteMessage.data, navigationHandler);
+  });
+
   return unsubscribe;
 }
 
-// ─── Add notification response handler (background tap) ──────────────────────
-export function addNotificationResponseReceivedListener(
+function handleNavigation(
+  data: Record<string, string> | undefined,
   navigationHandler: (screen: string) => void,
-): { remove: () => void } {
-  // App in background → user taps notification
-  const unsubscribeBackground = messaging().onNotificationOpenedApp(
-    (remoteMessage) => {
-      console.log("🔔 FCM tapped (background):", remoteMessage.data);
-      handleNavigation(remoteMessage.data, navigationHandler);
-    },
-  );
-
-  return {
-    remove: () => {
-      unsubscribeBackground();
-    },
-  };
-}
-
-// ─── Check if app was opened from a notification (quit state) ─────────────────
-export async function checkInitialFCMNotification(
-  navigationHandler: (screen: string) => void,
-): Promise<void> {
-  const remoteMessage = await messaging().getInitialNotification();
-  if (remoteMessage) {
-    console.log("🚀 App opened from quit state via FCM:", remoteMessage.data);
-    setTimeout(() => {
-      handleNavigation(remoteMessage.data, navigationHandler);
-    }, 1000);
+) {
+  // If no data at all, navigate to notifications
+  if (!data) {
+    console.log("📭 No data in notification, navigating to notifications");
+    navigationHandler("notifications");
+    return;
   }
-}
 
-// ─── Get stored FCM token ─────────────────────────────────────────────────────
-export async function getStoredPushToken(): Promise<string | null> {
-  return AsyncStorage.getItem(FCM_TOKEN_KEY);
-}
+  console.log("🔍 Processing notification data:", JSON.stringify(data));
 
-// ─── Badge helpers (no-ops without expo-notifications — handle via notifee if needed) ──
-export async function setBadgeCount(count: number): Promise<void> {
-  console.log("Badge count:", count, "— install notifee for badge support");
-}
+  // Handle approval status
+  if (data.type === "approval_status") {
+    const screen =
+      data.status === "approved" ? "/(tabs)/home" : "/(tabs)/account";
+    console.log("✅ Approval status navigation to:", screen);
+    navigationHandler(screen);
+    return;
+  }
 
-export async function clearBadge(): Promise<void> {
-  await setBadgeCount(0);
+  // Handle order status updates
+  if (data.type === "order_status_update" && data.orderId) {
+    console.log(
+      "📦 Order status update, navigating to myorders with orderId:",
+      data.orderId,
+    );
+    navigationHandler("/(tabs)/myorders");
+    return;
+  }
+
+  // Handle direct screen navigation
+  if (data.screen) {
+    console.log("🎯 Direct screen navigation to:", data.screen);
+    navigationHandler(data.screen);
+    return;
+  }
+
+  // Default fallback - navigate to notifications
+  console.log("📍 No specific navigation match, defaulting to notifications");
+  navigationHandler("notifications");
 }

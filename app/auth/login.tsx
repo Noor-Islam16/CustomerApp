@@ -714,7 +714,7 @@ const LoginScreen: React.FC = () => {
                         name="arrow-forward"
                         size={wp("5%")}
                         color={Colors.white}
-                        style={{ marginLeft: wp("2%") }}
+                        style={{ marginLeft: wp("2%"), marginBottom: "4" }}
                       />
                     </>
                   )}
@@ -797,7 +797,7 @@ const LoginScreen: React.FC = () => {
                         name="shield-checkmark-outline"
                         size={wp("5%")}
                         color={Colors.white}
-                        style={{ marginLeft: wp("2%") }}
+                        style={{ marginLeft: wp("2%"), marginBottom: wp("1%") }}
                       />
                     </>
                   )}
@@ -822,8 +822,8 @@ const LoginScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 </View>
-
-                {/* <View style={styles.waHint}>
+                {/* 
+                <View style={styles.waHint}>
                   <MaterialCommunityIcons
                     name="whatsapp"
                     size={wp("4.5%")}
@@ -1660,44 +1660,58 @@ const styles = StyleSheet.create({
     marginBottom: hp("1%"),
     marginLeft: wp("1%"),
   },
+  // ─── Phone Input Styles ──
   phoneInputCombined: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "center", // Keep this
     backgroundColor: Colors.surfaceAlt,
     borderRadius: wp("3.5%"),
     borderWidth: 1.5,
     borderColor: Colors.border,
     overflow: "hidden",
+    minHeight: hp("6.5%"), // Add fixed minimum height
   },
   countryCodeFixed: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center", // Add this
     paddingHorizontal: wp("3.5%"),
-    paddingVertical: hp("1.6%"),
+    paddingVertical: 0, // Remove vertical padding
     backgroundColor: "rgba(0,0,0,0.03)",
     gap: wp("1.5%"),
+    height: "100%", // Make it fill the parent height
   },
   countryFlagFixed: {
     fontSize: wp("5.5%"),
+    lineHeight: wp("6.5%"), // Add lineHeight
+    textAlignVertical: "center", // Android alignment
+    includeFontPadding: false, // Remove default font padding
   },
   countryDialFixed: {
     fontSize: wp("3.8%"),
     fontWeight: "600",
     color: Colors.textPrimary,
+    lineHeight: wp("4.5%"), // Add lineHeight
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   phoneSeparator: {
     width: 1.5,
     height: "60%",
+    backgroundColor: Colors.border, // Add background color
   },
   phoneInputField: {
-    fontFamily: "VivoSans-Medium",
     flex: 1,
     paddingHorizontal: wp("4%"),
-    paddingVertical: hp("1.6%"),
+    paddingVertical: 0, // Remove vertical padding
     fontSize: wp("4.2%"),
     fontWeight: "500",
     color: Colors.textPrimary,
     backgroundColor: "transparent",
+    lineHeight: wp("5%"), // Add lineHeight
+    textAlignVertical: "center", // Android alignment
+    includeFontPadding: false, // Remove default font padding
+    minHeight: hp("6.5%"), // Match parent height
   },
   phoneInputError: {
     backgroundColor: "#FFF5F5",
@@ -1770,6 +1784,7 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: wp("3.3%"), color: Colors.error, fontWeight: "500" },
 
+  // ── Button Styles ──
   primaryBtn: {
     backgroundColor: Colors.primary,
     borderRadius: wp("3.5%"),
@@ -1784,19 +1799,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 8,
-  },
-  primaryBtnDisabled: {
-    backgroundColor: Colors.textMuted,
-    shadowOpacity: 0,
-    elevation: 0,
+    minHeight: hp("6.5%"), // Add minimum height for consistency
   },
   primaryBtnText: {
     fontSize: wp("4.2%"),
     fontWeight: "700",
     color: Colors.textOnPrimary,
     letterSpacing: 0.5,
+    lineHeight: wp("5%"), // Add lineHeight
+    textAlignVertical: "center", // Android alignment
+    includeFontPadding: false,
   },
-
+  primaryBtnDisabled: {
+    backgroundColor: Colors.textMuted,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   legalNote: {
     fontSize: wp("3%"),
     color: Colors.textMuted,
@@ -1835,22 +1853,30 @@ const styles = StyleSheet.create({
 
   // ── Profile form styles ──
   profileFieldWrap: { marginBottom: hp("1.8%") },
+  // ── Profile Input Styles ──
   profileInputWrapper: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "center", // Keep this
     borderRadius: wp("3.5%"),
     borderWidth: 1.5,
     paddingHorizontal: wp("3.5%"),
-    paddingVertical: hp("0.2%"),
+    paddingVertical: 0, // Change to 0
+    minHeight: hp("6.5%"), // Add fixed height
   },
-  profileInputIcon: { marginRight: wp("2.5%") },
+  profileInputIcon: {
+    marginRight: wp("2.5%"),
+    textAlignVertical: "center", // Android alignment
+  },
   profileInput: {
-    fontFamily: "VivoSans-Medium",
     flex: 1,
-    paddingVertical: hp("1.6%"),
+    paddingVertical: 0, // Remove vertical padding
     fontSize: wp("3.8%"),
     color: Colors.textPrimary,
     fontWeight: "500",
+    lineHeight: wp("5%"), // Add lineHeight
+    textAlignVertical: "center", // Android alignment
+    includeFontPadding: false, // Remove default font padding
+    minHeight: hp("6.5%"), // Match parent height
   },
   fieldErrorText: {
     fontSize: wp("3%"),

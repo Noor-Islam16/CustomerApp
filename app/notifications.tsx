@@ -22,11 +22,12 @@ import {
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
 
-// ─── API Base URL (same as your api.ts) ──────────────────────────────────────
+// ─── API Base URL ─────────────────────────────────────────────────────────────
 // export const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "http://10.64.32.75:5000";
+export const BASE_URL = "https://customer-xnab.onrender.com";
+// export const BASE_URL = "http://10.64.32.75:5000";
 
-// ─── Notification Types ──────────────────────────────────────────────────────
+// ─── Notification Types ───────────────────────────────────────────────────────
 export interface ApiNotification {
   _id: string;
   user: string;
@@ -39,7 +40,7 @@ export interface ApiNotification {
   updatedAt: string;
 }
 
-// ─── Direct API Functions (bypassing apiFetch for debugging) ──────────────────
+// ─── Direct API Functions ─────────────────────────────────────────────────────
 const getAuthToken = async (): Promise<string | null> => {
   return AsyncStorage.getItem("auth_token");
 };
@@ -56,53 +57,29 @@ const notificationsApiFetch = async (
   };
 
   const url = `${BASE_URL}${path}`;
-  console.log(`📡 [Notifications] ${options.method || "GET"} ${url}`);
-  console.log(`🔑 Token present: ${!!token}`);
-
   const res = await fetch(url, { ...options, headers });
   const data = await res.json();
 
-  console.log(`📬 [Notifications] Status: ${res.status}`);
-  console.log(
-    `📬 [Notifications] Response:`,
-    JSON.stringify(data).substring(0, 300),
-  );
-
-  if (!res.ok) {
-    throw new Error(data.message || "Request failed");
-  }
-
+  if (!res.ok) throw new Error(data.message || "Request failed");
   return data;
 };
 
-const fetchNotificationsFromAPI = async () => {
-  const data = await notificationsApiFetch("/api/notifications?limit=50");
-  return data;
-};
+const fetchNotificationsFromAPI = async () =>
+  notificationsApiFetch("/api/notifications?limit=50");
 
-const markNotificationRead = async (id: string) => {
-  return notificationsApiFetch(`/api/notifications/${id}/read`, {
+const markNotificationRead = async (id: string) =>
+  notificationsApiFetch(`/api/notifications/${id}/read`, { method: "PATCH" });
+
+const markAllNotificationsRead = async () =>
+  notificationsApiFetch("/api/notifications/mark-all-read", {
     method: "PATCH",
   });
-};
 
-const markAllNotificationsRead = async () => {
-  return notificationsApiFetch("/api/notifications/mark-all-read", {
-    method: "PATCH",
-  });
-};
+const deleteNotification = async (id: string) =>
+  notificationsApiFetch(`/api/notifications/${id}`, { method: "DELETE" });
 
-const deleteNotification = async (id: string) => {
-  return notificationsApiFetch(`/api/notifications/${id}`, {
-    method: "DELETE",
-  });
-};
-
-const clearAllNotifications = async () => {
-  return notificationsApiFetch("/api/notifications/clear-all", {
-    method: "DELETE",
-  });
-};
+const clearAllNotifications = async () =>
+  notificationsApiFetch("/api/notifications/clear-all", { method: "DELETE" });
 
 // ─── Icon & Color Config per Type ─────────────────────────────────────────────
 const NOTIF_CONFIG: Record<
@@ -163,7 +140,7 @@ const filterNotifications = (notifs: ApiNotification[], tab: FilterTab) => {
   return notifs.filter((n) => n.type === tab);
 };
 
-// ─── Time formatter ─────────────────────────────────────────────────────────
+// ─── Time Formatter ───────────────────────────────────────────────────────────
 const formatTime = (dateStr: string): { time: string; date: string } => {
   const date = new Date(dateStr);
   const now = new Date();
@@ -173,19 +150,21 @@ const formatTime = (dateStr: string): { time: string; date: string } => {
   const diffDays = Math.floor(diff / 86400000);
 
   if (diffMins < 1) return { time: "Just now", date: "Today" };
-  if (diffMins < 60) return { time: `${diffMins} min ago`, date: "Today" };
-  if (diffHrs < 24)
-    return {
-      time: `${diffHrs} hr${diffHrs > 1 ? "s" : ""} ago`,
-      date: "Today",
-    };
+  if (diffMins < 60) return { time: `${diffMins}m ago`, date: "Today" };
+  if (diffHrs < 24) return { time: `${diffHrs}h ago`, date: "Today" };
   if (diffDays === 1) return { time: "Yesterday", date: "Yesterday" };
-  if (diffDays < 7) return { time: `${diffDays} days ago`, date: "Earlier" };
+  if (diffDays < 7) return { time: `${diffDays}d ago`, date: "Earlier" };
   return {
     time: date.toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
     date: "Earlier",
   };
 };
+
+// ─── Icon Size Constant (consistent across card) ──────────────────────────────
+const ICON_SIZE = wp("11%");
+const ICON_RADIUS = ICON_SIZE / 2;
+// Unread dot: fixed size relative to icon
+const DOT_SIZE = wp("3%");
 
 // ─── Animated Notification Card ───────────────────────────────────────────────
 const NotifCard = ({
@@ -208,6 +187,7 @@ const NotifCard = ({
       speed: 40,
       bounciness: 2,
     }).start();
+
   const handlePressOut = () =>
     Animated.spring(scale, {
       toValue: 1,
@@ -225,13 +205,16 @@ const NotifCard = ({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
+        {/* Unread left accent bar */}
         {!item.isRead && (
           <LinearGradient
             colors={[cfg.gradientStart, cfg.gradientEnd]}
             style={styles.unreadBar}
           />
         )}
+
         <View style={styles.cardInner}>
+          {/* Icon column */}
           <View style={styles.iconCol}>
             <LinearGradient
               colors={[cfg.gradientStart, cfg.gradientEnd]}
@@ -239,7 +222,7 @@ const NotifCard = ({
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Feather name={cfg.icon as any} size={wp("5%")} color="#fff" />
+              <Feather name={cfg.icon as any} size={wp("4.8%")} color="#fff" />
             </LinearGradient>
             {!item.isRead && (
               <View
@@ -247,6 +230,8 @@ const NotifCard = ({
               />
             )}
           </View>
+
+          {/* Text content */}
           <View style={styles.notifContent}>
             <View style={styles.notifTopRow}>
               <Text
@@ -258,20 +243,27 @@ const NotifCard = ({
               >
                 {item.title}
               </Text>
-              <Text style={styles.notifTime}>{time}</Text>
+              <View style={styles.topRightGroup}>
+                <Text style={styles.notifTime}>{time}</Text>
+                {/* Delete button - now in the first row with time */}
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => onDelete(item._id)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Feather
+                    name="x"
+                    size={wp("3.5%")}
+                    color={Colors.textMuted}
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.notifBody} numberOfLines={2}>
               {item.body}
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.deleteBtn}
-          onPress={() => onDelete(item._id)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Feather name="x" size={wp("3.5%")} color={Colors.textMuted} />
-        </TouchableOpacity>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -310,30 +302,13 @@ const NotificationScreen = () => {
   const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      console.log("📡 Fetching notifications...");
-
       const res = await fetchNotificationsFromAPI();
-      console.log("📬 Full response:", JSON.stringify(res, null, 2));
-
       if (res.success && res.data) {
-        const notifs = res.data.notifications || [];
-        console.log(`✅ Loaded ${notifs.length} notifications`);
-        if (notifs.length > 0) {
-          console.log(
-            "📋 First notification:",
-            JSON.stringify(notifs[0], null, 2),
-          );
-        }
-        setNotifications(notifs);
+        setNotifications(res.data.notifications || []);
       } else {
-        console.warn("⚠️ Unexpected response format:", res);
         setNotifications([]);
       }
-    } catch (error: any) {
-      console.error(
-        "❌ Failed to fetch notifications:",
-        error?.message || error,
-      );
+    } catch {
       setNotifications([]);
     } finally {
       setLoading(false);
@@ -388,7 +363,7 @@ const NotificationScreen = () => {
     } catch {}
   };
 
-  // Group by date
+  // Group by date bucket
   const dateOrder = ["Today", "Yesterday", "Earlier"];
   const listData: (
     | { type: "header"; label: string; count: number }
@@ -401,28 +376,19 @@ const NotificationScreen = () => {
     );
     if (group.length > 0) {
       listData.push({ type: "header", label, count: group.length });
-      group.forEach((item) => {
-        listData.push({ type: "item", item });
-      });
+      group.forEach((item) => listData.push({ type: "item", item }));
     }
   });
 
   if (loading) {
     return (
-      <View
-        style={[
-          styles.root,
-          { justifyContent: "center", alignItems: "center" },
-        ]}
-      >
+      <View style={[styles.root, styles.centered]}>
         <StatusBar
           barStyle="dark-content"
           backgroundColor={Colors.gradientStart}
         />
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={{ marginTop: hp("2%"), color: Colors.textSecondary }}>
-          Loading notifications...
-        </Text>
+        <Text style={styles.loadingText}>Loading notifications...</Text>
       </View>
     );
   }
@@ -444,14 +410,16 @@ const NotificationScreen = () => {
         <View style={styles.headerDecorCircle} />
         <View style={styles.headerDecorCircle2} />
 
+        {/* Top row: back + title + clear */}
         <View style={styles.headerTop}>
           <TouchableOpacity
-            style={styles.backBtn}
+            style={styles.iconButton}
             activeOpacity={0.8}
             onPress={() => router.back()}
           >
-            <Feather name="arrow-left" size={wp("5.5%")} color={Colors.white} />
+            <Feather name="arrow-left" size={wp("5%")} color={Colors.white} />
           </TouchableOpacity>
+
           <View style={styles.headerTitleBlock}>
             <Text style={styles.headerTitle}>Notifications</Text>
             {unreadCount > 0 && (
@@ -460,9 +428,10 @@ const NotificationScreen = () => {
               </View>
             )}
           </View>
+
           {notifications.length > 0 && (
             <TouchableOpacity
-              style={styles.clearAllBtn}
+              style={styles.iconButton}
               activeOpacity={0.8}
               onPress={handleClearAll}
             >
@@ -475,6 +444,7 @@ const NotificationScreen = () => {
           )}
         </View>
 
+        {/* Subtitle + mark all read */}
         <View style={styles.headerMeta}>
           <Text style={styles.headerSubtitle}>
             {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up"}
@@ -495,6 +465,7 @@ const NotificationScreen = () => {
           )}
         </View>
 
+        {/* Filter tabs */}
         <View style={styles.filterTabsRow}>
           {FILTER_TABS.map((tab) => {
             const isActive = activeTab === tab.key;
@@ -510,14 +481,15 @@ const NotificationScreen = () => {
               >
                 <Feather
                   name={tab.icon as any}
-                  size={wp("3.5%")}
-                  color={isActive ? Colors.primary : "rgba(255,255,255,0.7)"}
+                  size={wp("3.2%")}
+                  color={isActive ? Colors.primary : "rgba(255,255,255,0.75)"}
                 />
                 <Text
                   style={[
                     styles.filterTabText,
                     isActive && styles.filterTabTextActive,
                   ]}
+                  numberOfLines={1}
                 >
                   {tab.label}
                 </Text>
@@ -547,7 +519,7 @@ const NotificationScreen = () => {
       ) : (
         <FlatList
           data={listData}
-          keyExtractor={(item, index) =>
+          keyExtractor={(item) =>
             item.type === "header" ? `h-${item.label}` : item.item._id
           }
           renderItem={({ item }) => {
@@ -571,13 +543,31 @@ const NotificationScreen = () => {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: Colors.background },
+  root: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: hp("2%"),
+    color: Colors.textSecondary,
+    fontSize: wp("3.5%"),
+    // FIX: Custom font alignment on Android
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("5%"),
+  },
+
+  // ── Header ──
   header: {
-    paddingTop: Platform.OS === "ios" ? hp("6%") : hp("5.5%"),
+    paddingTop: Platform.OS === "ios" ? hp("6%") : hp("6%"),
     paddingBottom: hp("1.5%"),
     paddingHorizontal: wp("5%"),
-    borderBottomLeftRadius: wp("7%"),
-    borderBottomRightRadius: wp("7%"),
+    borderBottomLeftRadius: wp("6%"),
+    borderBottomRightRadius: wp("6%"),
     overflow: "hidden",
     zIndex: 10,
   },
@@ -599,64 +589,76 @@ const styles = StyleSheet.create({
     bottom: wp("2%"),
     left: -wp("5%"),
   },
+
   headerTop: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: hp("1%"),
+    marginBottom: hp("1.2%"),
+    gap: wp("2%"),
   },
-  backBtn: {
-    width: wp("10%"),
-    height: wp("10%"),
-    borderRadius: wp("5%"),
+  // FIX: Unified icon button size (was two separate styles before)
+  iconButton: {
+    width: wp("9.5%"),
+    height: wp("9.5%"),
+    borderRadius: wp("4.75%"),
     backgroundColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: wp("3%"),
+    flexShrink: 0,
   },
   headerTitleBlock: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: wp("2.5%"),
+    gap: wp("2%"),
   },
   headerTitle: {
-    fontSize: wp("6%"),
-    fontWeight: "800",
+    fontSize: wp("5.5%"),
+    marginTop: hp("0.5%"),
+    fontWeight: "700",
     color: Colors.white,
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("7%"),
   },
   headerBadge: {
+    // marginBottom: hp("0.3%"),
     backgroundColor: Colors.error,
-    width: wp("6%"),
-    height: wp("6%"),
-    borderRadius: wp("3%"),
+    minWidth: wp("5.5%"),
+    height: wp("5.5%"),
+    borderRadius: wp("2.75%"),
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: wp("1%"),
   },
   headerBadgeText: {
+    marginTop: hp("0.1%"),
     fontSize: wp("2.8%"),
     color: Colors.white,
     fontWeight: "800",
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("3.5%"),
   },
-  clearAllBtn: {
-    width: wp("10%"),
-    height: wp("10%"),
-    borderRadius: wp("5%"),
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+
   headerMeta: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: hp("1.8%"),
-    paddingLeft: wp("1%"),
+    marginBottom: hp("1.5%"),
+    paddingLeft: wp("0.5%"),
   },
   headerSubtitle: {
-    fontSize: wp("3.3%"),
+    fontSize: wp("3.2%"),
     color: "rgba(255,255,255,0.75)",
     fontWeight: "500",
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("4.5%"),
   },
   markAllBtn: {
     flexDirection: "row",
@@ -664,14 +666,21 @@ const styles = StyleSheet.create({
     gap: wp("1.5%"),
     backgroundColor: "rgba(255,255,255,0.15)",
     paddingHorizontal: wp("3%"),
-    paddingVertical: hp("0.5%"),
+    paddingVertical: hp("0.6%"),
     borderRadius: wp("3%"),
   },
   markAllText: {
     fontSize: wp("3%"),
     color: "rgba(255,255,255,0.9)",
     fontWeight: "600",
+    // FIX: Custom font vertical alignment
+    marginTop: hp("0.25%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("4%"),
   },
+
+  // ── Filter Tabs ──
   filterTabsRow: {
     flexDirection: "row",
     backgroundColor: "rgba(255,255,255,0.12)",
@@ -684,64 +693,110 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: wp("1.5%"),
+    gap: wp("1%"),
     paddingVertical: hp("0.9%"),
+    paddingHorizontal: wp("0.5%"),
     borderRadius: wp("2.5%"),
+    // FIX: prevent tab text wrapping on small screens
+    overflow: "hidden",
   },
-  filterTabActive: { backgroundColor: Colors.white },
+  filterTabActive: {
+    backgroundColor: Colors.white,
+  },
   filterTabText: {
-    fontSize: wp("3%"),
-    color: "rgba(255,255,255,0.75)",
+    marginTop: hp("0.2%"),
+    fontSize: wp("2.8%"),
+    color: "rgba(255,255,255,0.8)",
     fontWeight: "600",
+    flexShrink: 1,
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("3.8%"),
   },
-  filterTabTextActive: { color: Colors.primary, fontWeight: "800" },
-  tabBadge: {
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: wp("2%"),
-    paddingHorizontal: wp("1.5%"),
-    paddingVertical: hp("0.1%"),
-  },
-  tabBadgeActive: { backgroundColor: Colors.error },
-  tabBadgeText: {
-    fontSize: wp("2.4%"),
-    color: "rgba(255,255,255,0.9)",
+  filterTabTextActive: {
+    marginTop: hp("0.2%"),
+    color: Colors.primary,
     fontWeight: "700",
   },
-  tabBadgeTextActive: { color: Colors.white },
+  tabBadge: {
+    backgroundColor: "rgba(255,255,255,0.25)",
+    borderRadius: wp("16%"),
+    minWidth: wp("4%"),
+    paddingHorizontal: wp("1.2%"),
+    paddingVertical: hp("0.25%"),
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    marginBottom: hp("0.1%"),
+  },
+  tabBadgeActive: {
+    backgroundColor: Colors.error,
+  },
+  tabBadgeText: {
+    fontSize: wp("2.2%"),
+    color: "rgba(255,255,255,0.9)",
+    fontWeight: "700",
+    marginTop: hp("0.1%"),
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("3%"),
+  },
+  tabBadgeTextActive: {
+    color: Colors.white,
+  },
+
+  // ── List ──
   listContent: {
-    paddingTop: hp("2%"),
+    paddingTop: hp("1.5%"),
     paddingBottom: hp("12%"),
     paddingHorizontal: wp("4%"),
   },
+
+  // ── Section Label ──
   sectionLabel: {
     flexDirection: "row",
     alignItems: "center",
     gap: wp("2%"),
-    paddingVertical: hp("1.2%"),
+    // FIX: removed conflicting paddingTop + paddingVertical — use single padding
     paddingTop: hp("2%"),
+    paddingBottom: hp("0.8%"),
     paddingHorizontal: wp("1%"),
   },
   sectionLabelText: {
-    fontSize: wp("3.5%"),
+    fontSize: wp("3%"),
     fontWeight: "800",
     color: Colors.textSecondary,
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
     textTransform: "uppercase",
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("4%"),
   },
   sectionCountPill: {
     backgroundColor: Colors.border,
     paddingHorizontal: wp("2%"),
     paddingVertical: hp("0.2%"),
     borderRadius: wp("2%"),
+    alignItems: "center",
+    justifyContent: "center",
   },
   sectionCountText: {
     fontSize: wp("2.8%"),
     fontWeight: "700",
     color: Colors.textMuted,
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("3.8%"),
   },
+
+  // ── Notification Card ──
   notifCard: {
     backgroundColor: Colors.surface,
-    borderRadius: wp("4.5%"),
+    borderRadius: wp("4%"),
     marginBottom: hp("1.2%"),
     overflow: "hidden",
     shadowColor: Colors.shadow,
@@ -762,106 +817,132 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: wp("1%"),
-    borderTopLeftRadius: wp("4.5%"),
-    borderBottomLeftRadius: wp("4.5%"),
+    borderTopLeftRadius: wp("4%"),
+    borderBottomLeftRadius: wp("4%"),
   },
   cardInner: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center", // Changed from 'flex-start' to 'center' for vertical centering
     paddingVertical: hp("1.8%"),
     paddingLeft: wp("4.5%"),
-    paddingRight: wp("10%"),
+    paddingRight: wp("4%"), // Reduced right padding since delete button is inline now
   },
   iconCol: {
     position: "relative",
-    marginRight: wp("3.5%"),
-    marginTop: hp("0.2%"),
+    marginRight: wp("3%"),
+    flexShrink: 0,
+    // Remove marginTop since we're centering with alignItems: 'center'
   },
   iconGradient: {
-    width: wp("12%"),
-    height: wp("12%"),
-    borderRadius: wp("6%"),
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    borderRadius: ICON_RADIUS,
     alignItems: "center",
     justifyContent: "center",
   },
   unreadDot: {
     position: "absolute",
-    bottom: -hp("0.3%"),
+    bottom: 0,
     right: -wp("0.5%"),
-    width: wp("3.2%"),
-    height: wp("3.2%"),
-    borderRadius: wp("1.6%"),
+    width: DOT_SIZE,
+    height: DOT_SIZE,
+    borderRadius: DOT_SIZE / 2,
     borderWidth: 1.5,
     borderColor: Colors.white,
   },
-  notifContent: { flex: 1 },
+  notifContent: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center", // Center content vertically
+  },
   notifTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center", // Changed to center for alignment
     marginBottom: hp("0.5%"),
     gap: wp("2%"),
   },
+  topRightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: wp("2%"),
+    flexShrink: 0,
+  },
   notifTitle: {
-    fontSize: wp("3.7%"),
+    fontSize: wp("3.6%"),
     fontWeight: "700",
     color: Colors.textSecondary,
     flex: 1,
+    includeFontPadding: false,
+    textAlignVertical: "center",
     lineHeight: wp("5%"),
   },
-  notifTitleUnread: { color: Colors.textPrimary, fontWeight: "800" },
+  notifTitleUnread: {
+    color: Colors.textPrimary,
+    fontWeight: "800",
+  },
   notifTime: {
     fontSize: wp("2.6%"),
     color: Colors.textMuted,
     fontWeight: "500",
     flexShrink: 0,
-    marginTop: hp("0.2%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("3.8%"),
   },
   notifBody: {
-    fontSize: wp("3.2%"),
+    fontSize: wp("3.1%"),
     color: Colors.textSecondary,
-    lineHeight: hp("2.4%"),
+    lineHeight: wp("4.6%"),
     fontWeight: "400",
-    marginBottom: hp("1%"),
+    includeFontPadding: false,
   },
+
+  // Delete button - now inline with the first row
   deleteBtn: {
-    position: "absolute",
-    top: wp("3.5%"),
-    right: wp("3.5%"),
-    width: wp("7%"),
-    height: wp("7%"),
-    borderRadius: wp("3.5%"),
+    width: wp("6%"),
+    height: wp("6%"),
+    borderRadius: wp("3%"),
+    marginBottom: hp("0.25%"),
     backgroundColor: Colors.background,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
+
+  // ── Empty State ──
   emptyWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: wp("12%"),
-    marginTop: -hp("5%"),
   },
   emptyIconCircle: {
-    width: wp("28%"),
-    height: wp("28%"),
-    borderRadius: wp("14%"),
+    width: wp("26%"),
+    height: wp("26%"),
+    borderRadius: wp("13%"),
     alignItems: "center",
     justifyContent: "center",
     marginBottom: hp("3%"),
   },
   emptyTitle: {
-    fontSize: wp("5.5%"),
+    fontSize: wp("5%"),
     fontWeight: "800",
     color: Colors.textPrimary,
     marginBottom: hp("1%"),
     letterSpacing: -0.3,
+    // FIX: Custom font vertical alignment
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    lineHeight: wp("7%"),
   },
   emptySub: {
     fontSize: wp("3.5%"),
     color: Colors.textMuted,
     textAlign: "center",
-    lineHeight: hp("2.8%"),
+    // FIX: lineHeight as wp for consistency with custom font
+    lineHeight: wp("5.2%"),
+    includeFontPadding: false,
   },
 });
 

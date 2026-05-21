@@ -52,7 +52,12 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ visible, onClose }) => {
 
           {/* Message */}
           <View style={styles.messageCard}>
-            <Feather name="info" size={wp("4%")} color="#059669" />
+            <Feather
+              name="info"
+              size={wp("4%")}
+              color="#059669"
+              style={{ marginTop: wp("0.5%") }}
+            />
             <Text style={styles.message}>
               Your account has been approved by our admin team. You can now
               start placing orders and enjoy shopping!

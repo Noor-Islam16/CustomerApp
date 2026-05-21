@@ -169,11 +169,7 @@ const OrderCard = ({
   const total = order.totalAmount;
 
   return (
-    <TouchableOpacity
-      style={styles.orderCard}
-      activeOpacity={0.95}
-      onPress={onPress}
-    >
+    <View style={styles.orderCard}>
       {/* Header */}
       <View style={styles.cardHeader}>
         <View style={styles.headerLeft}>
@@ -243,22 +239,28 @@ const OrderCard = ({
             style={[styles.footerBtn, styles.cancelBtn]}
             onPress={onCancel}
           >
-            <Feather name="x" size={wp("3.5%")} color="#E53935" />
+            <Feather
+              name="x"
+              size={wp("3.5%")}
+              style={{ marginBottom: wp("0.5%") }}
+              color="#E53935"
+            />
             <Text style={[styles.footerBtnText, { color: "#E53935" }]}>
               Cancel
             </Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={styles.trackBtn}>
+        <TouchableOpacity style={styles.trackBtn} onPress={onPress}>
           <Text style={styles.trackBtnText}>View Details</Text>
           <Feather
             name="chevron-right"
             size={wp("3.5%")}
+            style={{ marginBottom: wp("0.5%") }}
             color={Colors.primary}
           />
         </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 };
 
@@ -294,7 +296,11 @@ const OrderDetailsModal = ({
             <View style={{ width: wp("8%") }} />
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.modalScrollView}
+            showsVerticalScrollIndicator={false}
+            bounces={true}
+          >
             <View style={styles.modalBody}>
               {/* Order Status Header */}
               <View style={styles.modalSection}>
@@ -324,7 +330,7 @@ const OrderDetailsModal = ({
                   </View>
                 </View>
                 <Text style={styles.orderDateLarge}>
-                  Placed on{" "}
+                  Confirm on{" "}
                   {new Date(order.createdAt).toLocaleDateString("en-IN", {
                     weekday: "long",
                     day: "numeric",
@@ -338,31 +344,6 @@ const OrderDetailsModal = ({
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Order Status</Text>
                 <OrderStatusTracker status={order.status} />
-              </View>
-
-              {/* Delivery Address */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Delivery Address</Text>
-                <View style={styles.addressCard}>
-                  <Text style={styles.addressName}>
-                    {order.deliveryAddress.contactName}
-                  </Text>
-                  <Text style={styles.addressText}>
-                    {order.deliveryAddress.addressLine1}
-                  </Text>
-                  {order.deliveryAddress.addressLine2 ? (
-                    <Text style={styles.addressText}>
-                      {order.deliveryAddress.addressLine2}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.addressText}>
-                    {order.deliveryAddress.city}, {order.deliveryAddress.state}{" "}
-                    - {order.deliveryAddress.pincode}
-                  </Text>
-                  <Text style={styles.addressPhone}>
-                    📞 {order.deliveryAddress.phone}
-                  </Text>
-                </View>
               </View>
 
               {/* Order Items */}
@@ -403,7 +384,7 @@ const OrderDetailsModal = ({
                   <Text style={styles.paymentLabel}>Subtotal</Text>
                   <Text style={styles.paymentValue}>₹{order.subtotal}</Text>
                 </View>
-                {order.couponDiscount > 0 && (
+                {/* {order.couponDiscount > 0 && (
                   <View style={styles.paymentRow}>
                     <Text style={[styles.paymentLabel, { color: "#4CAF50" }]}>
                       Discount
@@ -412,8 +393,8 @@ const OrderDetailsModal = ({
                       -₹{order.couponDiscount}
                     </Text>
                   </View>
-                )}
-                <View style={styles.paymentRow}>
+                )} */}
+                {/* <View style={styles.paymentRow}>
                   <Text style={styles.paymentLabel}>Delivery</Text>
                   <Text style={styles.paymentValue}>
                     {order.deliveryCharge === 0
@@ -436,7 +417,7 @@ const OrderDetailsModal = ({
                       ₹{order.deliveryTip}
                     </Text>
                   </View>
-                )}
+                )} */}
                 <View style={[styles.paymentRow, styles.paymentTotal]}>
                   <Text style={styles.paymentTotalLabel}>Total Paid</Text>
                   <Text style={styles.paymentTotalValue}>
@@ -506,7 +487,7 @@ const EmptyState = ({ activeTab }: { activeTab: string }) => {
       <Text style={styles.emptySub}>{message.subtitle}</Text>
       <TouchableOpacity
         style={styles.emptyBtn}
-        onPress={() => router.push("/")}
+        onPress={() => router.push("/(tabs)/home")}
         activeOpacity={0.8}
       >
         <Feather name="shopping-cart" size={wp("4%")} color={Colors.white} />
@@ -766,7 +747,12 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   tabActive: { backgroundColor: Colors.primaryLight },
-  tabText: { fontSize: wp("3.2%"), fontWeight: "600", color: Colors.textMuted },
+  tabText: {
+    fontSize: wp("3.2%"),
+    fontWeight: "600",
+    color: Colors.textMuted,
+    marginTop: hp("0.2%"),
+  },
   tabTextActive: { color: Colors.primary },
   tabIndicator: {
     position: "absolute",
@@ -826,7 +812,11 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  statusText: { fontSize: wp("2.8%"), fontWeight: "700" },
+  statusText: {
+    fontSize: wp("2.8%"),
+    fontWeight: "700",
+    marginTop: hp("0.2%"),
+  },
   itemsPreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -928,7 +918,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEE8EE",
     borderRadius: wp("2%"),
   },
-  cancelledText: { fontSize: wp("3.5%"), fontWeight: "600", color: "#E53935" },
+  cancelledText: {
+    fontSize: wp("3.5%"),
+    fontWeight: "600",
+    color: "#E53935",
+    marginTop: hp("0.2%"),
+  },
   cardFooter: {
     flexDirection: "row",
     alignItems: "center",
@@ -1007,7 +1002,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderTopLeftRadius: wp("6%"),
     borderTopRightRadius: wp("6%"),
-    maxHeight: hp("90%"),
+    maxHeight: hp("85%"),
+    flex: 1, // Add this to ensure proper height
+  },
+  modalScrollView: {
+    flex: 1, // Add this to make ScrollView take remaining space
   },
   modalHeader: {
     flexDirection: "row",

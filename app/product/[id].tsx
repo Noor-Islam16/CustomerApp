@@ -10,6 +10,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
@@ -17,6 +18,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  GestureHandlerRootView,
+  PanGestureHandler,
+  PinchGestureHandler,
+  State,
+} from "react-native-gesture-handler";
 import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
@@ -28,9 +35,9 @@ import { Product } from "../../constants/products";
 import { useCart } from "../../context/CartContext";
 import { ApiProduct, fetchProducts } from "../services/productApi";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "http://10.64.32.75:5000";
+const BASE_URL = "https://customer-xnab.onrender.com";
 
 // Map API product to app Product format
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
@@ -51,6 +58,8 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
     warranty: apiProduct.warranty || "No Warranty",
     stockQuantity: apiProduct.stockQuantity,
     minOrderQuantity: apiProduct.minOrderQuantity,
+    maxOrderQuantity: apiProduct.maxOrderQuantity,
+    enforceOrderLimits: apiProduct.enforceOrderLimits !== false,
     description: apiProduct.description || "",
     images: apiProduct.images || [],
     specifications: apiProduct.specifications || {},
@@ -61,6 +70,477 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
   };
 };
 
+// ─── Image Viewer Modal ────────────────────────────────────────────────────────
+interface ImageViewerModalProps {
+  visible: boolean;
+  images: string[];
+  initialIndex: number;
+  onClose: () => void;
+}
+
+const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
+  visible,
+  images,
+  initialIndex,
+  onClose,
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
+
+  // Zoom & pan state per image (reset when switching)
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  // Stored values between gestures
+  const lastScale = useRef(1);
+  const lastTranslateX = useRef(0);
+  const lastTranslateY = useRef(0);
+
+  // Pinch gesture
+  const pinchRef = useRef(null);
+  const panRef = useRef(null);
+
+  // Fade-in animation
+  const modalOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setCurrentIndex(initialIndex);
+      resetZoom();
+      Animated.timing(modalOpacity, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      modalOpacity.setValue(0);
+    }
+  }, [visible, initialIndex]);
+
+  const resetZoom = () => {
+    lastScale.current = 1;
+    lastTranslateX.current = 0;
+    lastTranslateY.current = 0;
+    scale.setValue(1);
+    translateX.setValue(0);
+    translateY.setValue(0);
+  };
+
+  const goToIndex = (index: number) => {
+    resetZoom();
+    setCurrentIndex(index);
+  };
+
+  // ── Pinch Handler ──
+  const onPinchGestureEvent = Animated.event(
+    [{ nativeEvent: { scale: scale } }],
+    { useNativeDriver: true },
+  );
+
+  const onPinchHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const newScale = Math.max(
+        1,
+        Math.min(lastScale.current * event.nativeEvent.scale, 5),
+      );
+      lastScale.current = newScale;
+      scale.setValue(newScale);
+
+      // If zoomed back to 1, reset translation
+      if (newScale <= 1) {
+        lastTranslateX.current = 0;
+        lastTranslateY.current = 0;
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  };
+
+  // ── Pan Handler ──
+  const onPanGestureEvent = Animated.event(
+    [{ nativeEvent: { translationX: translateX, translationY: translateY } }],
+    { useNativeDriver: true },
+  );
+
+  const onPanHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const currentScaleVal = lastScale.current;
+
+      if (currentScaleVal <= 1) {
+        // Swipe down to close
+        if (event.nativeEvent.translationY > 100) {
+          onClose();
+          return;
+        }
+        // Snap back if not zoomed
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        lastTranslateX.current = 0;
+        lastTranslateY.current = 0;
+      } else {
+        // Clamp translation within bounds when zoomed
+        const maxTranslateX = (SCREEN_WIDTH * (currentScaleVal - 1)) / 2;
+        const maxTranslateY = (SCREEN_HEIGHT * (currentScaleVal - 1)) / 2;
+
+        const newX = Math.max(
+          -maxTranslateX,
+          Math.min(
+            maxTranslateX,
+            lastTranslateX.current + event.nativeEvent.translationX,
+          ),
+        );
+        const newY = Math.max(
+          -maxTranslateY,
+          Math.min(
+            maxTranslateY,
+            lastTranslateY.current + event.nativeEvent.translationY,
+          ),
+        );
+
+        lastTranslateX.current = newX;
+        lastTranslateY.current = newY;
+        translateX.setValue(newX);
+        translateY.setValue(newY);
+      }
+    }
+
+    // Reset base offset so next gesture starts fresh
+    if (event.nativeEvent.state === State.BEGAN) {
+      translateX.setOffset(lastTranslateX.current);
+      translateX.setValue(0);
+      translateY.setOffset(lastTranslateY.current);
+      translateY.setValue(0);
+    }
+  };
+
+  // Double-tap to zoom / reset
+  const lastTap = useRef<number | null>(null);
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (lastTap.current && now - lastTap.current < 300) {
+      if (lastScale.current > 1) {
+        // Reset
+        lastScale.current = 1;
+        lastTranslateX.current = 0;
+        lastTranslateY.current = 0;
+        Animated.parallel([
+          Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
+          Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
+        ]).start();
+      } else {
+        // Zoom in to 2.5x
+        lastScale.current = 2.5;
+        Animated.spring(scale, { toValue: 2.5, useNativeDriver: true }).start();
+      }
+      lastTap.current = null;
+    } else {
+      lastTap.current = now;
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <Animated.View
+          style={[viewerStyles.overlay, { opacity: modalOpacity }]}
+        >
+          <StatusBar barStyle="light-content" backgroundColor="transparent" />
+
+          {/* ── Top Bar ── */}
+          <View style={viewerStyles.topBar}>
+            <TouchableOpacity
+              style={viewerStyles.closeBtn}
+              onPress={onClose}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close" size={wp("6%")} color="#fff" />
+            </TouchableOpacity>
+            <View style={viewerStyles.counterBadge}>
+              <Text style={viewerStyles.counterText}>
+                {currentIndex + 1} / {images.length}
+              </Text>
+            </View>
+            {/* <TouchableOpacity
+              style={viewerStyles.resetBtn}
+              onPress={resetZoom}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="fit-to-screen"
+                size={wp("5.5%")}
+                color="#fff"
+              />
+            </TouchableOpacity> */}
+          </View>
+
+          {/* ── Image Area ── */}
+          <PinchGestureHandler
+            ref={pinchRef}
+            onGestureEvent={onPinchGestureEvent}
+            onHandlerStateChange={onPinchHandlerStateChange}
+            simultaneousHandlers={[panRef]}
+          >
+            <Animated.View style={{ flex: 1 }}>
+              <PanGestureHandler
+                ref={panRef}
+                onGestureEvent={onPanGestureEvent}
+                onHandlerStateChange={onPanHandlerStateChange}
+                simultaneousHandlers={[pinchRef]}
+                minPointers={1}
+                maxPointers={2}
+                avgTouches
+              >
+                <Animated.View style={{ flex: 1 }}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={handleDoubleTap}
+                    style={{ flex: 1 }}
+                  >
+                    <View style={viewerStyles.imageArea}>
+                      <Animated.View
+                        style={{
+                          transform: [
+                            { scale },
+                            { translateX },
+                            { translateY },
+                          ],
+                        }}
+                      >
+                        {imageErrors.has(currentIndex) ? (
+                          <View style={viewerStyles.errorPlaceholder}>
+                            <MaterialCommunityIcons
+                              name="image-broken-variant"
+                              size={wp("15%")}
+                              color="rgba(255,255,255,0.3)"
+                            />
+                            <Text style={viewerStyles.errorText}>
+                              Image unavailable
+                            </Text>
+                          </View>
+                        ) : (
+                          <Image
+                            source={{ uri: images[currentIndex] }}
+                            style={viewerStyles.fullImage}
+                            resizeMode="contain"
+                            onError={() =>
+                              setImageErrors((prev) =>
+                                new Set(prev).add(currentIndex),
+                              )
+                            }
+                          />
+                        )}
+                      </Animated.View>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
+              </PanGestureHandler>
+            </Animated.View>
+          </PinchGestureHandler>
+
+          {/* ── Thumbnail Strip ── */}
+          {images.length > 1 && (
+            <View style={viewerStyles.thumbnailStrip}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={viewerStyles.thumbnailScroll}
+              >
+                {images.map((img, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => goToIndex(idx)}
+                    activeOpacity={0.8}
+                    style={[
+                      viewerStyles.thumbnail,
+                      currentIndex === idx && viewerStyles.thumbnailActive,
+                    ]}
+                  >
+                    {imageErrors.has(idx) ? (
+                      <View style={viewerStyles.thumbnailError}>
+                        <MaterialCommunityIcons
+                          name="image-broken-variant"
+                          size={wp("4%")}
+                          color="rgba(255,255,255,0.4)"
+                        />
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: img }}
+                        style={viewerStyles.thumbnailImage}
+                        resizeMode="cover"
+                      />
+                    )}
+                    {currentIndex === idx && (
+                      <View style={viewerStyles.thumbnailActiveDot} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* ── Hint ── */}
+          <View style={viewerStyles.hintRow}>
+            <Text style={viewerStyles.hintText}>
+              Pinch to zoom • Double-tap to zoom • Swipe down to close
+            </Text>
+          </View>
+        </Animated.View>
+      </GestureHandlerRootView>
+    </Modal>
+  );
+};
+
+// ─── Image Viewer Styles ───────────────────────────────────────────────────────
+const viewerStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  topBar: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? hp("6%") : hp("5%"),
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: wp("4%"),
+  },
+  closeBtn: {
+    width: wp("11%"),
+    height: wp("11%"),
+    borderRadius: wp("5.5%"),
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  counterBadge: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: wp("4%"),
+    paddingVertical: hp("0.6%"),
+    borderRadius: wp("4%"),
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  counterText: {
+    top: hp("0.1%"),
+    fontSize: wp("3.8%"),
+    fontWeight: "700",
+    color: "#fff",
+  },
+  resetBtn: {
+    width: wp("11%"),
+    height: wp("11%"),
+    borderRadius: wp("5.5%"),
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  imageArea: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.72,
+  },
+  errorPlaceholder: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.72,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: hp("2%"),
+  },
+  errorText: {
+    fontSize: wp("3.5%"),
+    color: "rgba(255,255,255,0.4)",
+  },
+  thumbnailStrip: {
+    position: "absolute",
+    bottom: hp("8%"),
+    left: 0,
+    right: 0,
+  },
+  thumbnailScroll: {
+    paddingHorizontal: wp("4%"),
+    gap: wp("2.5%"),
+    alignItems: "center",
+  },
+  thumbnail: {
+    width: wp("14%"),
+    height: wp("14%"),
+    borderRadius: wp("2%"),
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
+  thumbnailActive: {
+    borderColor: "#fff",
+    borderWidth: 2.5,
+  },
+  thumbnailImage: {
+    width: "100%",
+    height: "100%",
+  },
+  thumbnailError: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thumbnailActiveDot: {
+    position: "absolute",
+    bottom: -1,
+    left: "50%",
+    marginLeft: -wp("1%"),
+    width: wp("2%"),
+    height: wp("2%"),
+    borderRadius: wp("1%"),
+    backgroundColor: "#fff",
+  },
+  hintRow: {
+    position: "absolute",
+    bottom: hp("3%"),
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  hintText: {
+    fontSize: wp("2.8%"),
+    color: "rgba(255,255,255,0.4)",
+    textAlign: "center",
+  },
+});
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 const ProductDetailsScreen: React.FC = () => {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { addToCart, removeFromCart, updateQuantity, getCartQuantity } =
@@ -79,57 +559,51 @@ const ProductDetailsScreen: React.FC = () => {
   );
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
 
+  // ── Image Viewer State ──
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [imageViewerIndex, setImageViewerIndex] = useState(0);
+
   // ── Refs ──
   const scrollY = useRef(new Animated.Value(0)).current;
   const imageScrollRef = useRef<ScrollView>(null);
 
-  // ── Fetch Product from API ──
+  // ── Fetch Product ──
   useEffect(() => {
     const fetchProductDetails = async () => {
       if (!id) return;
-
       try {
         setLoading(true);
         setError(null);
-
-        console.log("📡 Fetching electronics product:", id);
-
         const response = await fetch(`${BASE_URL}/api/products/${id}`);
         const data = await response.json();
-
-        if (!data.success || !data.data) {
+        if (!data.success || !data.data)
           throw new Error(data.message || "Product not found");
-        }
-
         const apiProduct = data.data;
         const mappedProduct = mapApiProductToAppProduct(apiProduct);
         setProduct(mappedProduct);
-        console.log("✅ Product loaded:", mappedProduct.name);
-
-        // Fetch similar products from same category
+        const minQty = !apiProduct.enforceOrderLimits
+          ? 1
+          : apiProduct.minOrderQuantity || 1;
+        setQuantity(minQty);
         try {
           const similarData = await fetchProducts({
             category: apiProduct.category,
             limit: 6,
           });
-
           const filtered = similarData
             .filter((p) => p._id !== id)
             .map(mapApiProductToAppProduct)
             .slice(0, 6);
-
           setSimilarProducts(filtered);
         } catch (similarError) {
           console.error("Failed to fetch similar products:", similarError);
         }
       } catch (err: any) {
-        console.error("❌ Error fetching product:", err);
         setError(err.message || "Failed to load product");
       } finally {
         setLoading(false);
       }
     };
-
     fetchProductDetails();
   }, [id]);
 
@@ -140,8 +614,26 @@ const ProductDetailsScreen: React.FC = () => {
   useEffect(() => {
     if (isInCart) {
       setQuantity(currentCartQuantity);
+    } else if (product) {
+      const minQty = product.enforceOrderLimits
+        ? product.minOrderQuantity || 1
+        : 1;
+      setQuantity(minQty);
     }
-  }, [currentCartQuantity, isInCart]);
+  }, [currentCartQuantity, isInCart, product]);
+
+  // ── Quantity Constraints ──
+  const limitsEnabled = product?.enforceOrderLimits !== false;
+  const minOrderQty = limitsEnabled ? product?.minOrderQuantity || 1 : 1;
+  const maxOrderQty = limitsEnabled
+    ? product?.maxOrderQuantity || product?.stockQuantity || 999
+    : product?.stockQuantity || 999;
+  const stockQty = product?.stockQuantity || 0;
+
+  const isAtMin = quantity <= minOrderQty;
+  const isAtMax = quantity >= Math.min(maxOrderQty, stockQty);
+  const canDecrease = limitsEnabled ? quantity > minOrderQty : quantity > 1;
+  const canIncrease = quantity < Math.min(maxOrderQty, stockQty);
 
   // ── Handlers ──
   const handleAddToCart = () => {
@@ -150,9 +642,7 @@ const ProductDetailsScreen: React.FC = () => {
     Alert.alert("Added to Cart", `${product.name} added to your cart!`);
   };
 
-  const handleGoToCart = () => {
-    router.push("/cart");
-  };
+  const handleGoToCart = () => router.push("/cart");
 
   const handleBuyNow = () => {
     if (!product) return;
@@ -169,7 +659,10 @@ const ProductDetailsScreen: React.FC = () => {
         style: "destructive",
         onPress: () => {
           removeFromCart(product.id);
-          setQuantity(1);
+          const minQty = product.enforceOrderLimits
+            ? product.minOrderQuantity || 1
+            : 1;
+          setQuantity(minQty);
         },
       },
     ]);
@@ -177,18 +670,42 @@ const ProductDetailsScreen: React.FC = () => {
 
   const handleQuantityChange = (change: number) => {
     if (!product) return;
-
     if (isInCart) {
       const next = Math.max(
-        1,
-        Math.min(product.stockQuantity, currentCartQuantity + change),
+        minOrderQty,
+        Math.min(Math.min(maxOrderQty, stockQty), currentCartQuantity + change),
       );
+      if (change < 0 && limitsEnabled && currentCartQuantity <= minOrderQty) {
+        Alert.alert(
+          "Minimum Order Required",
+          `Minimum order quantity is ${minOrderQty} unit${minOrderQty > 1 ? "s" : ""}.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Remove Anyway",
+              style: "destructive",
+              onPress: () =>
+                updateQuantity(product.id, currentCartQuantity - 1),
+            },
+          ],
+        );
+        return;
+      }
       updateQuantity(product.id, next);
     } else {
       setQuantity((prev) =>
-        Math.max(1, Math.min(product.stockQuantity, prev + change)),
+        Math.max(
+          minOrderQty,
+          Math.min(Math.min(maxOrderQty, stockQty), prev + change),
+        ),
       );
     }
+  };
+
+  // ── Open Image Viewer ──
+  const handleImagePress = (index: number) => {
+    setImageViewerIndex(index);
+    setImageViewerVisible(true);
   };
 
   // ── Header Animation ──
@@ -257,7 +774,6 @@ const ProductDetailsScreen: React.FC = () => {
 
   const displayQuantity = isInCart ? currentCartQuantity : quantity;
 
-  // Create image array from product images
   const productImages =
     product.images && product.images.length > 0
       ? product.images.map((img) => img.url)
@@ -269,6 +785,14 @@ const ProductDetailsScreen: React.FC = () => {
         barStyle="dark-content"
         backgroundColor="transparent"
         translucent
+      />
+
+      {/* ── Image Viewer Modal ── */}
+      <ImageViewerModal
+        visible={imageViewerVisible}
+        images={productImages}
+        initialIndex={imageViewerIndex}
+        onClose={() => setImageViewerVisible(false)}
       />
 
       {/* ── Animated Header ── */}
@@ -323,7 +847,7 @@ const ProductDetailsScreen: React.FC = () => {
         </LinearGradient>
       </Animated.View>
 
-      {/* ── Back Button Overlay ── */}
+      {/* ── Floating Back Button ── */}
       <TouchableOpacity
         style={[
           styles.floatingBackBtn,
@@ -350,7 +874,7 @@ const ProductDetailsScreen: React.FC = () => {
           paddingBottom: hp("15%"),
         }}
       >
-        {/* Image Carousel */}
+        {/* ── Image Carousel ── */}
         <View style={styles.imageCarousel}>
           <ScrollView
             ref={imageScrollRef}
@@ -365,30 +889,46 @@ const ProductDetailsScreen: React.FC = () => {
             }}
           >
             {productImages.map((image, index) => (
-              <View key={index} style={styles.imageContainer}>
-                {imageErrors.has(index) ? (
-                  <View style={styles.imagePlaceholder}>
-                    <MaterialCommunityIcons
-                      name="devices"
-                      size={wp("20%")}
-                      color={Colors.border}
-                    />
-                  </View>
-                ) : (
-                  <Image
-                    source={{ uri: image }}
-                    style={styles.productImage}
-                    resizeMode="cover"
-                    onError={() =>
-                      setImageErrors((prev) => new Set(prev).add(index))
-                    }
-                  />
-                )}
-              </View>
+              // ── Tappable image to open viewer ──
+              <TouchableOpacity
+                key={index}
+                activeOpacity={0.95}
+                onPress={() => handleImagePress(index)}
+              >
+                <View style={styles.imageContainer}>
+                  {imageErrors.has(index) ? (
+                    <View style={styles.imagePlaceholder}>
+                      <MaterialCommunityIcons
+                        name="devices"
+                        size={wp("20%")}
+                        color={Colors.border}
+                      />
+                    </View>
+                  ) : (
+                    <>
+                      <Image
+                        source={{ uri: image }}
+                        style={styles.productImage}
+                        resizeMode="cover"
+                        onError={() =>
+                          setImageErrors((prev) => new Set(prev).add(index))
+                        }
+                      />
+                      {/* Tap hint overlay */}
+                      <View style={styles.imageTapHint}>
+                        <MaterialCommunityIcons
+                          name="magnify-plus-outline"
+                          size={wp("5%")}
+                          color="rgba(255,255,255,0.9)"
+                        />
+                      </View>
+                    </>
+                  )}
+                </View>
+              </TouchableOpacity>
             ))}
           </ScrollView>
 
-          {/* Image indicators */}
           {productImages.length > 1 && (
             <View style={styles.imageIndicators}>
               {productImages.map((_, index) => (
@@ -403,7 +943,6 @@ const ProductDetailsScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Image count badge */}
           {productImages.length > 1 && (
             <View style={styles.imageCountBadge}>
               <Text style={styles.imageCountText}>
@@ -593,49 +1132,109 @@ const ProductDetailsScreen: React.FC = () => {
             </View>
           </View>
 
+          {/* Min/Max Order Info */}
+          {!isOutOfStock &&
+            limitsEnabled &&
+            (minOrderQty > 1 || maxOrderQty < stockQty) && (
+              <View style={styles.orderInfoContainer}>
+                {minOrderQty > 1 && (
+                  <View style={styles.orderInfoChip}>
+                    <Feather
+                      name="info"
+                      size={wp("3%")}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.orderInfoText}>
+                      Min order: {minOrderQty} unit{minOrderQty > 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                )}
+                {maxOrderQty < stockQty && (
+                  <View style={styles.orderInfoChip}>
+                    <Feather name="info" size={wp("3%")} color="#F59E0B" />
+                    <Text style={[styles.orderInfoText, { color: "#D97706" }]}>
+                      Max order: {maxOrderQty} unit{maxOrderQty > 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+          {!isOutOfStock && !limitsEnabled && (
+            <View style={styles.orderInfoContainer}>
+              <View style={styles.orderInfoChip}>
+                <MaterialCommunityIcons
+                  name="information-outline"
+                  size={wp("3.5%")}
+                  color="#059669"
+                />
+                <Text style={[styles.orderInfoText, { color: "#059669" }]}>
+                  No order limits applied
+                </Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.divider} />
 
           {/* Quantity Selector */}
           {!isOutOfStock && (
             <View style={styles.quantitySection}>
               <Text style={styles.quantityLabel}>Quantity</Text>
-              <View style={styles.quantitySelector}>
-                <TouchableOpacity
-                  style={[
-                    styles.qtyBtn,
-                    displayQuantity <= 1 && styles.qtyBtnDisabled,
-                  ]}
-                  onPress={() => handleQuantityChange(-1)}
-                  disabled={displayQuantity <= 1}
-                >
-                  <Feather
-                    name="minus"
-                    size={wp("4.5%")}
-                    color={Colors.primary}
-                  />
-                </TouchableOpacity>
-                <Text style={styles.quantityValue}>{displayQuantity}</Text>
-                <TouchableOpacity
-                  style={[
-                    styles.qtyBtn,
-                    displayQuantity >= product.stockQuantity &&
-                      styles.qtyBtnDisabled,
-                  ]}
-                  onPress={() => handleQuantityChange(1)}
-                  disabled={displayQuantity >= product.stockQuantity}
-                >
-                  <Feather
-                    name="plus"
-                    size={wp("4.5%")}
-                    color={Colors.primary}
-                  />
-                </TouchableOpacity>
+              <View style={styles.quantityControls}>
+                <View style={styles.quantitySelector}>
+                  <TouchableOpacity
+                    style={[
+                      styles.qtyBtn,
+                      !canDecrease && styles.qtyBtnDisabled,
+                    ]}
+                    onPress={() => handleQuantityChange(-1)}
+                    disabled={!canDecrease}
+                  >
+                    <Feather
+                      name="minus"
+                      size={wp("4.5%")}
+                      color={canDecrease ? Colors.primary : Colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                  <Text style={styles.quantityValue}>{displayQuantity}</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.qtyBtn,
+                      !canIncrease && styles.qtyBtnDisabled,
+                    ]}
+                    onPress={() => handleQuantityChange(1)}
+                    disabled={!canIncrease}
+                  >
+                    <Feather
+                      name="plus"
+                      size={wp("4.5%")}
+                      color={canIncrease ? Colors.primary : Colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.quantityHint}>
+                  {!limitsEnabled
+                    ? `${Math.min(stockQty, stockQty) - displayQuantity} more available`
+                    : minOrderQty > 1 && displayQuantity === minOrderQty
+                      ? `Minimum ${minOrderQty} unit${minOrderQty > 1 ? "s" : ""} required`
+                      : isAtMax
+                        ? `Maximum ${Math.min(maxOrderQty, stockQty)} unit${
+                            Math.min(maxOrderQty, stockQty) > 1 ? "s" : ""
+                          } allowed`
+                        : `${Math.min(maxOrderQty, stockQty) - displayQuantity} more available`}
+                </Text>
               </View>
             </View>
           )}
 
           {/* Tabs */}
-          <View style={styles.tabContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabScrollContent}
+            style={styles.tabContainer}
+          >
             <TouchableOpacity
               style={[styles.tab, activeTab === "details" && styles.tabActive]}
               onPress={() => setActiveTab("details")}
@@ -669,7 +1268,7 @@ const ProductDetailsScreen: React.FC = () => {
                 <View style={styles.tabIndicator} />
               )}
             </TouchableOpacity>
-          </View>
+          </ScrollView>
 
           {/* Tab Content */}
           <View style={styles.tabContent}>
@@ -678,8 +1277,6 @@ const ProductDetailsScreen: React.FC = () => {
                 <Text style={styles.description}>
                   {product.description || "No description available."}
                 </Text>
-
-                {/* Tags */}
                 {product.tags.length > 0 && (
                   <View style={styles.tagsSection}>
                     <Text style={styles.tagsTitle}>Product Tags</Text>
@@ -695,7 +1292,6 @@ const ProductDetailsScreen: React.FC = () => {
               </View>
             ) : (
               <View style={styles.specsContainer}>
-                {/* Technical Specifications */}
                 {product.specifications &&
                   Object.keys(product.specifications).length > 0 && (
                     <>
@@ -713,8 +1309,6 @@ const ProductDetailsScreen: React.FC = () => {
                       <View style={styles.specDivider} />
                     </>
                   )}
-
-                {/* General Info */}
                 <Text style={styles.specSectionTitle}>Product Information</Text>
                 <View style={styles.specRow}>
                   <Text style={styles.specLabel}>Brand</Text>
@@ -772,8 +1366,27 @@ const ProductDetailsScreen: React.FC = () => {
                     {product.minOrderQuantity}
                   </Text>
                 </View>
-
-                {/* Compatibility */}
+                {product.maxOrderQuantity && (
+                  <View style={styles.specRow}>
+                    <Text style={styles.specLabel}>Max Order Qty</Text>
+                    <Text style={styles.specValue}>
+                      {product.maxOrderQuantity}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.specRow}>
+                  <Text style={styles.specLabel}>Order Limits</Text>
+                  <Text
+                    style={[
+                      styles.specValue,
+                      {
+                        color: limitsEnabled ? Colors.success : Colors.warning,
+                      },
+                    ]}
+                  >
+                    {limitsEnabled ? "Enforced" : "Disabled"}
+                  </Text>
+                </View>
                 {product.compatibility && product.compatibility.length > 0 && (
                   <>
                     <View style={styles.specDivider} />
@@ -823,7 +1436,7 @@ const ProductDetailsScreen: React.FC = () => {
         </View>
       </Animated.ScrollView>
 
-      {/* Bottom Action Bar */}
+      {/* ── Bottom Action Bar ── */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom }]}>
         <LinearGradient
           colors={["rgba(255,255,255,0.95)", Colors.white]}
@@ -897,7 +1510,13 @@ const ProductDetailsScreen: React.FC = () => {
                       size={wp("5%")}
                       color={Colors.primary}
                     />
-                    <Text style={styles.addToCartText}>Add to Cart</Text>
+                    <Text style={styles.addToCartText}>
+                      {!limitsEnabled
+                        ? "Add to Cart"
+                        : minOrderQty > 1
+                          ? `Add ${minOrderQty} to Cart`
+                          : "Add to Cart"}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.buyNowBtn}
@@ -930,10 +1549,7 @@ const ProductDetailsScreen: React.FC = () => {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.white,
-  },
+  root: { flex: 1, backgroundColor: Colors.white },
   loadingContainer: {
     flex: 1,
     alignItems: "center",
@@ -965,7 +1581,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 
-  // ── Header ──
+  // Header
   animatedHeader: {
     position: "absolute",
     top: 0,
@@ -979,9 +1595,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  headerGradient: {
-    paddingBottom: hp("1.5%"),
-  },
+  headerGradient: { paddingBottom: hp("1.5%") },
   headerContent: {
     flexDirection: "row",
     alignItems: "center",
@@ -1047,10 +1661,8 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // ── Image Carousel ──
-  imageCarousel: {
-    position: "relative",
-  },
+  // Image Carousel
+  imageCarousel: { position: "relative" },
   imageContainer: {
     width: SCREEN_WIDTH,
     height: SCREEN_WIDTH,
@@ -1068,6 +1680,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: Colors.surfaceAlt,
   },
+  // Zoom icon hint in bottom-right of image
+  imageTapHint: {
+    position: "absolute",
+    bottom: wp("3%"),
+    right: wp("3%"),
+    width: wp("9%"),
+    height: wp("9%"),
+    borderRadius: wp("4.5%"),
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   imageIndicators: {
     position: "absolute",
     bottom: wp("4%"),
@@ -1083,10 +1707,7 @@ const styles = StyleSheet.create({
     borderRadius: wp("1%"),
     backgroundColor: "rgba(255,255,255,0.5)",
   },
-  indicatorActive: {
-    backgroundColor: Colors.primary,
-    width: wp("6%"),
-  },
+  indicatorActive: { backgroundColor: Colors.primary, width: wp("6%") },
   imageCountBadge: {
     position: "absolute",
     top: wp("3%"),
@@ -1102,11 +1723,8 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 
-  // ── Product Info ──
-  infoContainer: {
-    paddingHorizontal: wp("4%"),
-    paddingTop: hp("2%"),
-  },
+  // Product Info
+  infoContainer: { paddingHorizontal: wp("4%"), paddingTop: hp("2%") },
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1158,11 +1776,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontWeight: "500",
   },
-  badgesRow: {
-    flexDirection: "row",
-    gap: wp("2%"),
-    marginBottom: hp("1%"),
-  },
+  badgesRow: { flexDirection: "row", gap: wp("2%"), marginBottom: hp("1%") },
   fastMovingBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1172,11 +1786,7 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  fastMovingText: {
-    fontSize: wp("2.8%"),
-    fontWeight: "600",
-    color: "#E65100",
-  },
+  fastMovingText: { fontSize: wp("2.8%"), fontWeight: "600", color: "#E65100" },
   featuredBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1186,11 +1796,7 @@ const styles = StyleSheet.create({
     paddingVertical: hp("0.4%"),
     borderRadius: wp("3%"),
   },
-  featuredText: {
-    fontSize: wp("2.8%"),
-    fontWeight: "600",
-    color: "#F57F17",
-  },
+  featuredText: { fontSize: wp("2.8%"), fontWeight: "600", color: "#F57F17" },
   attributesRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1224,37 +1830,30 @@ const styles = StyleSheet.create({
     marginVertical: hp("2%"),
   },
 
-  // ── Price Section ──
+  // Price
   priceSection: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  priceMain: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: wp("2%"),
-  },
+  priceMain: { flexDirection: "row", alignItems: "center", gap: wp("1%") },
   currency: {
-    fontSize: wp("4%"),
+    fontSize: wp("7%"),
     fontWeight: "700",
     color: Colors.textPrimary,
-    marginTop: hp("0.8%"),
   },
-  price: {
-    fontSize: wp("7%"),
-    fontWeight: "800",
-    color: Colors.textPrimary,
-  },
+  price: { fontSize: wp("7%"), fontWeight: "700", color: Colors.textPrimary },
   discountBadgeInline: {
     backgroundColor: "#FF3B30",
     paddingHorizontal: wp("2.5%"),
     paddingVertical: hp("0.3%"),
     borderRadius: wp("1.5%"),
+    marginBottom: hp("0.5%"),
   },
   discountTextInline: {
     fontSize: wp("3%"),
-    fontWeight: "800",
+    fontWeight: "700",
+    marginTop: hp("0.3%"),
     color: Colors.white,
   },
   originalPrice: {
@@ -1263,32 +1862,48 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
     marginTop: hp("0.3%"),
   },
-  stockInfo: {
+  stockInfo: { flexDirection: "row", alignItems: "center", gap: wp("1.5%") },
+  stockDot: { width: wp("2%"), height: wp("2%"), borderRadius: wp("1%") },
+  stockText: { fontSize: wp("3.2%"), fontWeight: "600" },
+
+  // Order Info
+  orderInfoContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: wp("2%"),
+    marginTop: hp("1%"),
+  },
+  orderInfoChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: wp("1.5%"),
+    gap: wp("1%"),
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("2.5%"),
+    paddingVertical: hp("0.4%"),
+    borderRadius: wp("3%"),
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  stockDot: {
-    width: wp("2%"),
-    height: wp("2%"),
-    borderRadius: wp("1%"),
-  },
-  stockText: {
-    fontSize: wp("3.2%"),
+  orderInfoText: {
+    marginTop: hp("0.2%"),
+    fontSize: wp("2.8%"),
+    color: Colors.textSecondary,
     fontWeight: "600",
   },
 
-  // ── Quantity ──
-  quantitySection: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: hp("2%"),
-  },
+  // Quantity
+  quantitySection: { marginBottom: hp("2%") },
   quantityLabel: {
     fontSize: wp("3.8%"),
     fontWeight: "600",
     color: Colors.textPrimary,
+    marginBottom: hp("1%"),
+  },
+  quantityControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: wp("3%"),
   },
   quantitySelector: {
     flexDirection: "row",
@@ -1309,38 +1924,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  qtyBtnDisabled: {
-    opacity: 0.5,
-  },
+  qtyBtnDisabled: { opacity: 0.4, backgroundColor: Colors.surfaceAlt },
   quantityValue: {
-    fontSize: wp("4%"),
+    marginTop: hp("0.2%"),
+    fontSize: wp("4.5%"),
     fontWeight: "700",
     color: Colors.textPrimary,
     minWidth: wp("6%"),
     textAlign: "center",
   },
+  quantityHint: {
+    flex: 1,
+    fontSize: wp("2.8%"),
+    color: Colors.textMuted,
+    fontWeight: "500",
+    textAlign: "right",
+  },
 
-  // ── Tabs ──
+  // Tabs
   tabContainer: {
-    flexDirection: "row",
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    marginBottom: hp("0%"),
   },
+  tabScrollContent: { flexDirection: "row", alignItems: "center" },
   tab: {
-    flex: 1,
+    paddingHorizontal: wp("5%"),
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: hp("1.5%"),
     position: "relative",
+    minWidth: wp("35%"),
   },
-  tabText: {
-    fontSize: wp("3.8%"),
-    fontWeight: "500",
-    color: Colors.textMuted,
-  },
-  tabTextActive: {
-    color: Colors.primary,
-    fontWeight: "700",
-  },
+  tabActive: {},
+  tabText: { fontSize: wp("3.8%"), fontWeight: "500", color: Colors.textMuted },
+  tabTextActive: { color: Colors.primary, fontWeight: "700" },
   tabIndicator: {
     position: "absolute",
     bottom: -1,
@@ -1349,9 +1967,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderRadius: 1.5,
   },
-  tabContent: {
-    paddingVertical: hp("2%"),
-  },
+  tabContent: { paddingVertical: hp("2%") },
   description: {
     fontSize: wp("3.5%"),
     color: Colors.textSecondary,
@@ -1359,21 +1975,15 @@ const styles = StyleSheet.create({
     marginBottom: hp("2%"),
   },
 
-  // ── Tags ──
-  tagsSection: {
-    marginTop: hp("1%"),
-  },
+  // Tags
+  tagsSection: { marginTop: hp("1%") },
   tagsTitle: {
     fontSize: wp("3.5%"),
     fontWeight: "600",
     color: Colors.textPrimary,
     marginBottom: hp("1%"),
   },
-  tagsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: wp("2%"),
-  },
+  tagsContainer: { flexDirection: "row", flexWrap: "wrap", gap: wp("2%") },
   tagChip: {
     backgroundColor: Colors.primaryLight,
     paddingHorizontal: wp("2.5%"),
@@ -1386,10 +1996,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // ── Specifications ──
-  specsContainer: {
-    gap: hp("0.5%"),
-  },
+  // Specs
+  specsContainer: { gap: hp("0.5%") },
   specSectionTitle: {
     fontSize: wp("3.8%"),
     fontWeight: "700",
@@ -1444,10 +2052,8 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // ── Similar Products ──
-  similarSection: {
-    marginTop: hp("1%"),
-  },
+  // Similar
+  similarSection: { marginTop: hp("1%") },
   similarHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1464,15 +2070,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.primary,
   },
-  similarScroll: {
-    gap: wp("3%"),
-    paddingRight: wp("4%"),
-  },
-  similarCard: {
-    width: wp("42%"),
-  },
+  similarScroll: { gap: wp("3%"), paddingRight: wp("4%") },
+  similarCard: { width: wp("42%") },
 
-  // ── Bottom Bar ──
+  // Bottom Bar
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -1502,6 +2103,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   addToCartText: {
+    marginTop: hp("0.2%"),
     fontSize: wp("3.8%"),
     fontWeight: "700",
     color: Colors.primary,
@@ -1534,6 +2136,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   goToCartText: {
+    marginTop: hp("0.2%"),
     fontSize: wp("3.8%"),
     fontWeight: "700",
     color: Colors.white,
@@ -1557,11 +2160,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: Colors.primary,
   },
-  buyNowBtn: {
-    flex: 1,
-    borderRadius: wp("3%"),
-    overflow: "hidden",
-  },
+  buyNowBtn: { flex: 1, borderRadius: wp("3%"), overflow: "hidden" },
   buyNowGradient: {
     flexDirection: "row",
     alignItems: "center",
@@ -1570,8 +2169,9 @@ const styles = StyleSheet.create({
     paddingVertical: hp("1.6%"),
   },
   buyNowText: {
+    marginTop: hp("0.2%"),
     fontSize: wp("3.8%"),
-    fontWeight: "800",
+    fontWeight: "700",
     color: Colors.white,
   },
   outOfStockBtn: {

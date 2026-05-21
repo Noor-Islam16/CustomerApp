@@ -16,6 +16,7 @@ export interface Product {
   stockQuantity: number;
   minOrderQuantity: number;
   maxOrderQuantity?: number; // ✅ NEW
+  enforceOrderLimits?: boolean;
   description: string;
   images: {
     url: string;

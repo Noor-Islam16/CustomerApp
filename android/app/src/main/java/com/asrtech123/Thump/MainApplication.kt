@@ -1,4 +1,4 @@
-package com.asrtech123.Thump
+package com.thump
 
 import android.app.Application
 import android.content.res.Configuration

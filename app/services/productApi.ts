@@ -1,7 +1,8 @@
 import { getToken } from "./api";
 
 // const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "http://10.64.32.75:5000";
+export const BASE_URL = "https://customer-xnab.onrender.com";
+// export const BASE_URL = "http://10.64.32.75:5000";
 
 export interface ProductImage {
   url: string;
@@ -20,6 +21,7 @@ export interface ApiProduct {
   compatibility?: string[];
   sellingPrice: number;
   originalPrice?: number;
+  enforceOrderLimits?: boolean;
   color?: string;
   material?: string;
   dimensions?: string;

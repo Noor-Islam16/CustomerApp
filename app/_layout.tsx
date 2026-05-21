@@ -3,7 +3,6 @@ import { ApprovalProvider, useApproval } from "@/context/ApprovalContext";
 import { CartProvider } from "@/context/CartContext";
 import { FontProvider } from "@/context/FontContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import messaging from "@react-native-firebase/messaging";
 import {
   DarkTheme,
   DefaultTheme,
@@ -15,25 +14,20 @@ import { useEffect, useRef } from "react";
 import "react-native-reanimated";
 import {
   addNotificationResponseReceivedListener,
-  checkInitialFCMNotification,
   registerForPushNotificationsAsync,
-  setupForegroundMessageHandler,
+  setupBackgroundHandler,
+  setupForegroundHandler,
 } from "./services/notifications";
 
-export const unstable_settings = {
-  anchor: "(tabs)",
-};
-
-// ── Must be outside component tree ──────────────────────────────────────────
-messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-  console.log("📬 FCM background message:", remoteMessage.data);
-});
+export const unstable_settings = { anchor: "(tabs)" };
 
 SplashScreen.preventAutoHideAsync();
 
+// ✅ MUST be at module level — before any React code runs
+setupBackgroundHandler();
+
 function ApprovalModalWrapper() {
   const { showApprovalModal, setShowApprovalModal } = useApproval();
-
   return (
     <ApprovalModal
       visible={showApprovalModal}
@@ -45,46 +39,30 @@ function ApprovalModalWrapper() {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-  const foregroundUnsub = useRef<(() => void) | null>(null);
-  const backgroundSub = useRef<{ remove: () => void } | null>(null);
+  const cleanupListener = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    setTimeout(() => {
-      SplashScreen.hideAsync();
-    }, 500);
+    setTimeout(() => SplashScreen.hideAsync(), 500);
   }, []);
 
   useEffect(() => {
-    // Register device and save FCM token to backend
+    // ✅ No delay on notification listener — must register immediately
     registerForPushNotificationsAsync();
 
-    // Foreground: app is open, message arrives
-    foregroundUnsub.current = setupForegroundMessageHandler((message) => {
-      console.log(
-        "📬 FCM foreground message:",
-        message.notification?.title,
-        message.data,
-      );
-      // FCM won't auto-display when app is open
-      // Add notifee here if you want foreground banners
-    });
+    const unsubscribeForeground = setupForegroundHandler();
 
-    // Background: app was in background, user tapped notification
-    backgroundSub.current = addNotificationResponseReceivedListener(
+    cleanupListener.current = addNotificationResponseReceivedListener(
       (screen) => {
         console.log("🧭 Navigating to:", screen);
         router.push(screen as any);
       },
     );
 
-    // Quit state: app was fully closed, user tapped notification
-    checkInitialFCMNotification((screen) => {
-      router.push(screen as any);
-    });
-
     return () => {
-      foregroundUnsub.current?.();
-      backgroundSub.current?.remove();
+      unsubscribeForeground();
+      if (cleanupListener.current) {
+        cleanupListener.current();
+      }
     };
   }, []);
 

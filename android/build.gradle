@@ -1,15 +1,19 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
+  // ext {
+  //       kotlinVersion = "1.9.22" 
+  //   }
   repositories {
     google()
     mavenCentral()
+    
   }
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
-    id 'com.google.gms.google-services' version '4.4.4' apply false
+    classpath("com.google.gms:google-services:4.4.0")  // Add this line
   }
 }
 

@@ -21,6 +21,7 @@ import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from "react-native-responsive-screen";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ProductCard from "../components/ProductCard";
 import Colors from "../constants/colors";
 import { CATEGORIES, Product } from "../constants/products";
@@ -29,7 +30,6 @@ import { ApiProduct, fetchAllProducts } from "./services/productApi";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Map API product to app Product format (SIMPLIFIED)
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
   return {
     id: apiProduct._id,
@@ -60,6 +60,7 @@ const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
 
 interface FilterState {
   categories: string[];
+  brands: string[];
   priceRange: { min: number; max: number };
   sortBy:
     | "popularity"
@@ -89,13 +90,13 @@ const PRICE_RANGES = [
   { label: "Above ₹5000", min: 5000, max: Infinity },
 ];
 
-type LayoutType = "grid" | "list";
-
 const AllProductsScreen: React.FC = () => {
+  const insets = useSafeAreaInsets();
+
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [layout, setLayout] = useState<LayoutType>("grid");
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -106,6 +107,7 @@ const AllProductsScreen: React.FC = () => {
 
   const [filters, setFilters] = useState<FilterState>({
     categories: [],
+    brands: [],
     priceRange: { min: 0, max: Infinity },
     sortBy: "popularity",
     inStockOnly: false,
@@ -124,6 +126,15 @@ const AllProductsScreen: React.FC = () => {
       const apiProducts = await fetchAllProducts();
       const mappedProducts = apiProducts.map(mapApiProductToAppProduct);
       setAllProducts(mappedProducts);
+
+      const brands = Array.from(
+        new Set(
+          mappedProducts
+            .map((p) => p.brand?.trim())
+            .filter((b): b is string => !!b && b.length > 0),
+        ),
+      ).sort();
+      setAvailableBrands(brands);
     } catch (err: any) {
       setError(err.message || "Failed to load products");
     }
@@ -157,7 +168,6 @@ const AllProductsScreen: React.FC = () => {
   useEffect(() => {
     let result = [...allProducts];
 
-    // Search
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
       result = result.filter(
@@ -169,30 +179,33 @@ const AllProductsScreen: React.FC = () => {
       );
     }
 
-    // Categories
     if (filters.categories.length > 0) {
       result = result.filter((p) =>
         filters.categories.includes(p.category.toLowerCase()),
       );
     }
 
-    // Price
+    if (filters.brands.length > 0) {
+      result = result.filter((p) =>
+        filters.brands
+          .map((b) => b.toLowerCase())
+          .includes((p.brand || "").toLowerCase()),
+      );
+    }
+
     result = result.filter(
       (p) =>
         p.sellingPrice >= filters.priceRange.min &&
         p.sellingPrice <= filters.priceRange.max,
     );
 
-    // In stock
     if (filters.inStockOnly) result = result.filter((p) => p.inStock);
 
-    // Discounted
     if (filters.discountedOnly)
       result = result.filter(
         (p) => p.originalPrice > 0 && p.sellingPrice < p.originalPrice,
       );
 
-    // Sort
     switch (filters.sortBy) {
       case "price_low":
         result.sort((a, b) => a.sellingPrice - b.sellingPrice);
@@ -221,6 +234,7 @@ const AllProductsScreen: React.FC = () => {
 
     let count = 0;
     if (filters.categories.length > 0) count++;
+    if (filters.brands.length > 0) count++;
     if (filters.priceRange.min > 0 || filters.priceRange.max < Infinity)
       count++;
     if (filters.inStockOnly) count++;
@@ -233,13 +247,16 @@ const AllProductsScreen: React.FC = () => {
     await loadProducts();
     setRefreshing(false);
   }, [loadProducts]);
+
   const applyFilters = () => {
     setFilters(tempFilters);
     setShowFilterModal(false);
   };
+
   const resetFilters = () => {
     const resetState: FilterState = {
       categories: [],
+      brands: [],
       priceRange: { min: 0, max: Infinity },
       sortBy: filters.sortBy,
       inStockOnly: false,
@@ -248,10 +265,12 @@ const AllProductsScreen: React.FC = () => {
     setTempFilters(resetState);
     setFilters(resetState);
   };
+
   const clearAllFilters = () => {
     resetFilters();
     setShowFilterModal(false);
   };
+
   const toggleCategory = (categoryId: string) => {
     setTempFilters((prev) => ({
       ...prev,
@@ -260,9 +279,20 @@ const AllProductsScreen: React.FC = () => {
         : [...prev.categories, categoryId],
     }));
   };
+
+  const toggleBrand = (brand: string) => {
+    setTempFilters((prev) => ({
+      ...prev,
+      brands: prev.brands.includes(brand)
+        ? prev.brands.filter((b) => b !== brand)
+        : [...prev.brands, brand],
+    }));
+  };
+
   const selectPriceRange = (min: number, max: number) => {
     setTempFilters((prev) => ({ ...prev, priceRange: { min, max } }));
   };
+
   const selectSort = (sortBy: FilterState["sortBy"]) => {
     setFilters((prev) => ({ ...prev, sortBy }));
     setShowSortModal(false);
@@ -276,9 +306,7 @@ const AllProductsScreen: React.FC = () => {
           backgroundColor={Colors.gradientStart}
         />
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.loadingText}>
-          Loading electronics accessories...
-        </Text>
+        <Text style={styles.loadingText}>Loading products...</Text>
       </View>
     );
   }
@@ -308,7 +336,7 @@ const AllProductsScreen: React.FC = () => {
             />
           </TouchableOpacity>
           <View>
-            <Text style={styles.headerTitle}>Electronics</Text>
+            <Text style={styles.headerTitle}>All Products</Text>
             <Text style={styles.headerSub}>
               {filteredProducts.length} items found
             </Text>
@@ -380,6 +408,7 @@ const AllProductsScreen: React.FC = () => {
                 color={Colors.primary}
               />
             </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.filterChip,
@@ -404,6 +433,7 @@ const AllProductsScreen: React.FC = () => {
                 Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
               </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.quickChip,
@@ -425,6 +455,7 @@ const AllProductsScreen: React.FC = () => {
                 In Stock
               </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.quickChip,
@@ -446,6 +477,7 @@ const AllProductsScreen: React.FC = () => {
                 On Sale
               </Text>
             </TouchableOpacity>
+
             {PRICE_RANGES.slice(0, 3).map((range) => (
               <TouchableOpacity
                 key={range.label}
@@ -475,43 +507,14 @@ const AllProductsScreen: React.FC = () => {
               </TouchableOpacity>
             ))}
           </ScrollView>
-          <View style={styles.layoutToggle}>
-            <TouchableOpacity
-              style={[
-                styles.layoutBtn,
-                layout === "grid" && styles.layoutBtnActive,
-              ]}
-              onPress={() => setLayout("grid")}
-            >
-              <MaterialCommunityIcons
-                name="view-grid"
-                size={wp("4.5%")}
-                color={layout === "grid" ? Colors.primary : Colors.textMuted}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.layoutBtn,
-                layout === "list" && styles.layoutBtnActive,
-              ]}
-              onPress={() => setLayout("list")}
-            >
-              <MaterialCommunityIcons
-                name="view-list"
-                size={wp("4.5%")}
-                color={layout === "list" ? Colors.primary : Colors.textMuted}
-              />
-            </TouchableOpacity>
-          </View>
         </View>
 
-        {/* Product List */}
+        {/* Product Grid */}
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => item.id}
-          key={layout}
-          numColumns={layout === "grid" ? 2 : 1}
-          columnWrapperStyle={layout === "grid" ? styles.gridRow : undefined}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -522,13 +525,7 @@ const AllProductsScreen: React.FC = () => {
             />
           }
           renderItem={({ item }) => (
-            <View
-              style={
-                layout === "list"
-                  ? styles.listCardWrapper
-                  : styles.gridCardWrapper
-              }
-            >
+            <View style={styles.gridCardWrapper}>
               <ProductCard product={item} />
             </View>
           )}
@@ -566,7 +563,14 @@ const AllProductsScreen: React.FC = () => {
           activeOpacity={1}
           onPress={() => setShowSortModal(false)}
         >
-          <View style={styles.sortModal}>
+          {/* ── safe-area bottom inset for sort modal ── */}
+          <View
+            style={[
+              styles.sortModal,
+              { paddingBottom: Math.max(insets.bottom, hp("2%")) },
+            ]}
+          >
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Sort By</Text>
               <TouchableOpacity onPress={() => setShowSortModal(false)}>
@@ -600,7 +604,7 @@ const AllProductsScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Filter Modal - SIMPLIFIED */}
+      {/* Filter Modal */}
       <Modal
         visible={showFilterModal}
         transparent
@@ -609,19 +613,27 @@ const AllProductsScreen: React.FC = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.filterModal}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Filters</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}>
                 <Feather name="x" size={wp("5%")} color={Colors.textPrimary} />
               </TouchableOpacity>
             </View>
+
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={styles.filterContent}
+              contentContainerStyle={styles.filterContentContainer}
             >
-              {/* Categories */}
+              {/* ── Categories — horizontal scroll ── */}
               <Text style={styles.filterSectionTitle}>Categories</Text>
-              <View style={styles.filterChipsContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalChipScroll}
+                style={styles.horizontalScrollRow}
+              >
                 {CATEGORIES.filter((c) => c.id !== "all").map((category) => (
                   <TouchableOpacity
                     key={category.id}
@@ -644,11 +656,59 @@ const AllProductsScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
 
-              {/* Price Range */}
+              {/* ── Brands — horizontal scroll ── */}
+              {availableBrands.length > 0 && (
+                <>
+                  <Text style={styles.filterSectionTitle}>Brands</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.horizontalChipScroll}
+                    style={styles.horizontalScrollRow}
+                  >
+                    {availableBrands.map((brand) => (
+                      <TouchableOpacity
+                        key={brand}
+                        style={[
+                          styles.brandChip,
+                          tempFilters.brands.includes(brand) &&
+                            styles.brandChipActive,
+                        ]}
+                        onPress={() => toggleBrand(brand)}
+                      >
+                        {tempFilters.brands.includes(brand) && (
+                          <Feather
+                            name="check"
+                            size={wp("3%")}
+                            color={Colors.primary}
+                            style={{ marginRight: wp("1%") }}
+                          />
+                        )}
+                        <Text
+                          style={[
+                            styles.brandChipText,
+                            tempFilters.brands.includes(brand) &&
+                              styles.brandChipTextActive,
+                          ]}
+                        >
+                          {brand}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* ── Price Range — horizontal scroll ── */}
               <Text style={styles.filterSectionTitle}>Price Range</Text>
-              <View style={styles.priceRangeContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalChipScroll}
+                style={styles.horizontalScrollRow}
+              >
                 {PRICE_RANGES.map((range) => (
                   <TouchableOpacity
                     key={range.label}
@@ -672,7 +732,7 @@ const AllProductsScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
 
               {/* Availability */}
               <Text style={styles.filterSectionTitle}>Availability</Text>
@@ -701,7 +761,7 @@ const AllProductsScreen: React.FC = () => {
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.toggleRow, { borderBottomWidth: 0 }]}
+                style={styles.toggleRow}
                 onPress={() =>
                   setTempFilters((prev) => ({
                     ...prev,
@@ -725,7 +785,14 @@ const AllProductsScreen: React.FC = () => {
                 </View>
               </TouchableOpacity>
             </ScrollView>
-            <View style={styles.filterActions}>
+
+            {/* ── Filter Actions with safe-area bottom inset ── */}
+            <View
+              style={[
+                styles.filterActions,
+                { paddingBottom: Math.max(insets.bottom, hp("1.5%")) },
+              ]}
+            >
               <TouchableOpacity style={styles.clearBtn} onPress={resetFilters}>
                 <Text style={styles.clearBtnText}>Clear All</Text>
               </TouchableOpacity>
@@ -783,15 +850,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerTitle: {
-    fontSize: wp("4.8%"),
+    fontSize: wp("4.2%"),
     fontWeight: "700",
     color: Colors.white,
-    letterSpacing: 0.2,
+    lineHeight: wp("5.2%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   headerSub: {
-    fontSize: wp("3%"),
-    color: "rgba(255,255,255,0.8)",
-    marginTop: hp("0.2%"),
+    fontSize: wp("3.8%"),
+    color: "rgba(255,255,255,0.9)",
+    fontWeight: "500",
+    lineHeight: wp("5%"),
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   headerActions: { flexDirection: "row", alignItems: "center" },
   headerIcon: {
@@ -849,7 +921,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: hp("1.5%"),
   },
-  filterScroll: { flex: 1, gap: wp("2%"), paddingRight: wp("2%") },
+  filterScroll: { flex: 1, gap: wp("2%") },
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -871,6 +943,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   filterChipText: {
+    top: hp("0.1%"),
     fontSize: wp("3.3%"),
     fontWeight: "600",
     color: Colors.textPrimary,
@@ -890,22 +963,9 @@ const styles = StyleSheet.create({
   },
   quickChipText: { fontSize: wp("3.3%"), color: Colors.textSecondary },
   quickChipTextActive: { color: Colors.primary, fontWeight: "600" },
-  layoutToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.white,
-    borderRadius: wp("5%"),
-    padding: wp("0.8%"),
-    marginLeft: wp("2%"),
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  layoutBtn: { padding: wp("1.8%"), borderRadius: wp("4%") },
-  layoutBtnActive: { backgroundColor: Colors.primaryLight },
-  listContent: { paddingBottom: hp("3%") },
+  listContent: { paddingBottom: hp("6%") },
   gridRow: { justifyContent: "space-between" },
-  gridCardWrapper: { width: "48.5%", marginBottom: hp("1%") },
-  listCardWrapper: { width: "100%", marginBottom: hp("1.2%") },
+  gridCardWrapper: { width: "49%", marginBottom: hp("1%") },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
@@ -942,24 +1002,33 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.overlay,
     justifyContent: "flex-end",
   },
+  modalHandle: {
+    width: wp("10%"),
+    height: hp("0.5%"),
+    borderRadius: hp("0.25%"),
+    backgroundColor: Colors.border,
+    alignSelf: "center",
+    marginTop: hp("1%"),
+    marginBottom: hp("0.5%"),
+  },
   sortModal: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: wp("6%"),
     borderTopRightRadius: wp("6%"),
-    paddingBottom: hp("3%"),
+    // paddingBottom handled inline via insets
   },
   filterModal: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: wp("6%"),
     borderTopRightRadius: wp("6%"),
-    height: "80%",
+    height: "75%",
   },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: wp("5%"),
-    paddingVertical: hp("2%"),
+    paddingVertical: hp("1.5%"),
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
@@ -979,23 +1048,44 @@ const styles = StyleSheet.create({
   },
   sortOptionLeft: { flexDirection: "row", alignItems: "center", gap: wp("3%") },
   sortOptionText: { fontSize: wp("3.8%"), color: Colors.textPrimary },
-  filterContent: { flex: 1, paddingHorizontal: wp("5%"), paddingTop: hp("2%") },
+  filterContent: {
+    flex: 1,
+    paddingHorizontal: wp("5%"),
+  },
+  filterContentContainer: {
+    paddingTop: hp("1.5%"),
+    paddingBottom: hp("2%"),
+  },
   filterSectionTitle: {
     fontSize: wp("3.8%"),
     fontWeight: "700",
     color: Colors.textPrimary,
-    marginTop: hp("2%"),
-    marginBottom: hp("1.5%"),
+    marginBottom: hp("1%"),
+    marginTop: hp("0.5%"),
   },
+
+  // ── Horizontal scroll rows inside filter modal ──
+  horizontalScrollRow: {
+    marginBottom: hp("2%"),
+    marginHorizontal: -wp("5%"), // bleed to modal edges so chips don't clip
+  },
+  horizontalChipScroll: {
+    paddingHorizontal: wp("5%"),
+    gap: wp("2.5%"),
+    alignItems: "center",
+  },
+
+  // legacy wrap containers kept for reference — no longer used for chips
   filterChipsContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: wp("2.5%"),
+    marginBottom: hp("1.5%"),
   },
   filterChipBig: {
     alignItems: "center",
     backgroundColor: Colors.surfaceAlt,
-    paddingHorizontal: wp("3%"),
+    paddingHorizontal: wp("3.5%"),
     paddingVertical: hp("1.2%"),
     borderRadius: wp("3%"),
     borderWidth: 1,
@@ -1009,10 +1099,31 @@ const styles = StyleSheet.create({
   filterChipEmoji: { fontSize: wp("5%"), marginBottom: hp("0.3%") },
   filterChipBigText: { fontSize: wp("3%"), color: Colors.textSecondary },
   filterChipBigTextActive: { color: Colors.primary, fontWeight: "600" },
+  brandChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: wp("3.5%"),
+    paddingVertical: hp("1%"),
+    borderRadius: wp("5%"),
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  brandChipActive: {
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
+  },
+  brandChipText: {
+    fontSize: wp("3.2%"),
+    color: Colors.textSecondary,
+    fontWeight: "500",
+  },
+  brandChipTextActive: { color: Colors.primary, fontWeight: "700" },
   priceRangeContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: wp("2.5%"),
+    marginBottom: hp("1.5%"),
   },
   priceRangeChip: {
     backgroundColor: Colors.surfaceAlt,
@@ -1032,11 +1143,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: hp("1.5%"),
+    paddingVertical: hp("1.2%"),
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  toggleLabel: { fontSize: wp("3.5%"), color: Colors.textPrimary },
+  toggleLabel: {
+    fontSize: wp("3.5%"),
+    color: Colors.textPrimary,
+  },
   toggle: {
     width: wp("12%"),
     height: hp("3%"),
@@ -1058,7 +1172,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: wp("3%"),
     paddingHorizontal: wp("5%"),
-    paddingVertical: hp("2%"),
+    paddingTop: hp("1.5%"),
+    // paddingBottom handled inline via insets
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.surface,
