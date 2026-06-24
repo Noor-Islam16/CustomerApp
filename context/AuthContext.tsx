@@ -7,11 +7,14 @@ import React, {
   useState,
 } from "react";
 import { apiGetMe, clearToken, getToken, saveToken } from "../app/services/api";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import auth from "@react-native-firebase/auth";
 
 interface User {
   _id: string;
-  phone: string;
-  countryCode: string;
+  email: string;
+  phone?: string;
+  countryCode?: string;
   role: string;
   isProfileComplete: boolean;
   approvalStatus: string;
@@ -82,6 +85,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    try {
+      await auth().signOut();
+    } catch (e) {
+      console.warn("Firebase signOut error:", e);
+    }
+    try {
+      await GoogleSignin.revokeAccess();
+    } catch (e) {
+      console.warn("Google Sign-In revokeAccess error:", e);
+    }
+    try {
+      await GoogleSignin.signOut();
+    } catch (e) {
+      console.warn("Google Sign-In signOut error:", e);
+    }
     await clearToken();
     setUser(null);
   }, []);

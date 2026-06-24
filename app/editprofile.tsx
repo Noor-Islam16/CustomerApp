@@ -332,6 +332,7 @@ const EditProfileScreen = () => {
       setSaving(true);
       await apiUpdateProfile({
         contactName: contactName.trim(),
+        phone: phone.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
         city: city.trim(),

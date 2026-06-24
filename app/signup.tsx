@@ -30,7 +30,7 @@ import {
 } from "react-native-responsive-screen";
 import Colors from "../constants/colors";
 import {
-  apiCheckPhone,
+  apiCheckEmail,
   apiCompleteProfile,
   apiSendOtp,
   apiVerifyOtp,
@@ -38,10 +38,11 @@ import {
 } from "./services/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type Step = "phone" | "otp" | "profile";
+type Step = "email" | "otp" | "profile";
 
 interface ProfileForm {
   contactName: string;
+  phone: string;
   addressLine1: string;
   addressLine2: string;
   city: string;
@@ -54,6 +55,7 @@ interface ProfileForm {
 
 interface FieldError {
   contactName?: string;
+  phone?: string;
   addressLine1?: string;
   city?: string;
   state?: string;
@@ -92,12 +94,12 @@ const INDIAN_STATES = [
 // ─── Main Component ──────────────────────────────────────────────────────────
 const ProfileSetupScreen: React.FC = () => {
   // ── Step State ──
-  const [step, setStep] = useState<Step>("phone");
+  const [step, setStep] = useState<Step>("email");
 
-  // ── Phone State ──
-  const [phone, setPhone] = useState("");
-  const [isPhoneRegistered, setIsPhoneRegistered] = useState(false);
-  const [checkingPhone, setCheckingPhone] = useState(false);
+  // ── Email State ──
+  const [email, setEmail] = useState("");
+  const [isEmailRegistered, setIsEmailRegistered] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
 
   // ── OTP State ──
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
@@ -108,6 +110,7 @@ const ProfileSetupScreen: React.FC = () => {
   // ── Profile Form State ──
   const [form, setForm] = useState<ProfileForm>({
     contactName: "",
+    phone: "",
     addressLine1: "",
     addressLine2: "",
     city: "",
@@ -138,7 +141,8 @@ const ProfileSetupScreen: React.FC = () => {
   const progressWidth = useRef(new Animated.Value(0)).current;
   const otpShakeAnim = useRef(new Animated.Value(0)).current;
 
-  const phoneRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const profilePhoneRef = useRef<TextInput>(null);
   const otpRefs = useRef<(TextInput | null)[]>([]);
   const nameRef = useRef<TextInput>(null);
   const addr1Ref = useRef<TextInput>(null);
@@ -266,20 +270,19 @@ const ProfileSetupScreen: React.FC = () => {
     ]).start();
   }, [otpShakeAnim]);
 
-  // ── Check if phone is registered ──────────────────────────────────────────
-  const checkPhoneRegistration = async (phoneNumber: string) => {
-    if (phoneNumber.length === 10) {
-      setCheckingPhone(true);
+  // ── Check if email is registered ──────────────────────────────────────────
+  const checkEmailRegistration = async (emailAddr: string) => {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr.trim())) {
+      setCheckingEmail(true);
       try {
-        const data = await apiCheckPhone(phoneNumber);
-        setIsPhoneRegistered(data.isRegistered);
+        const data = await apiCheckEmail(emailAddr);
+        setIsEmailRegistered(data.isRegistered);
         return data.isRegistered as boolean;
       } catch {
-        // If check fails, don't block the user — just hide the banner
-        setIsPhoneRegistered(false);
+        setIsEmailRegistered(false);
         return false;
       } finally {
-        setCheckingPhone(false);
+        setCheckingEmail(false);
       }
     }
     return false;
@@ -287,17 +290,17 @@ const ProfileSetupScreen: React.FC = () => {
 
   // ── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async () => {
-    if (phone.length !== 10) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       Alert.alert(
-        "Invalid Number",
-        "Please enter a valid 10-digit mobile number.",
+        "Invalid Email",
+        "Please enter a valid email address.",
       );
       triggerShake();
       return;
     }
     setOtpLoading(true);
     try {
-      await apiSendOtp(phone);
+      await apiSendOtp(email);
       setResendTimer(RESEND_COOLDOWN);
       setStep("otp");
       setTimeout(() => otpRefs.current[0]?.focus(), 400);
@@ -354,7 +357,7 @@ const ProfileSetupScreen: React.FC = () => {
     }
     setOtpLoading(true);
     try {
-      const data = await apiVerifyOtp(phone, otpCode);
+      const data = await apiVerifyOtp(email, otpCode);
 
       // Save JWT for the profile step (protected route)
       await saveToken(data.token);
@@ -378,7 +381,7 @@ const ProfileSetupScreen: React.FC = () => {
     setOtp(Array(OTP_LENGTH).fill(""));
     setOtpError("");
     try {
-      await apiSendOtp(phone);
+      await apiSendOtp(email);
       setResendTimer(RESEND_COOLDOWN);
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
     } catch (err: any) {
@@ -444,6 +447,10 @@ const ProfileSetupScreen: React.FC = () => {
       newErrors.contactName = "Contact person name is required.";
     else if (form.contactName.trim().length < 2)
       newErrors.contactName = "Please enter a valid name.";
+    if (!form.phone.trim())
+      newErrors.phone = "Phone number is required.";
+    else if (!/^\d{10}$/.test(form.phone.trim()))
+      newErrors.phone = "Enter a valid 10-digit mobile number.";
     if (!form.addressLine1.trim())
       newErrors.addressLine1 = "Address is required.";
     if (!form.city.trim()) newErrors.city = "City is required.";
@@ -467,6 +474,7 @@ const ProfileSetupScreen: React.FC = () => {
     try {
       const data = await apiCompleteProfile({
         contactName: form.contactName,
+        phone: form.phone,
         addressLine1: form.addressLine1,
         addressLine2: form.addressLine2,
         city: form.city,
@@ -532,20 +540,20 @@ const ProfileSetupScreen: React.FC = () => {
         : Colors.surfaceAlt;
 
   const getStepNumber = () => {
-    if (step === "phone") return "1/3";
+    if (step === "email") return "1/3";
     if (step === "otp") return "2/3";
     return "3/3";
   };
 
   const getHeaderTitle = () => {
-    if (step === "phone") return "Enter Mobile Number";
+    if (step === "email") return "Enter Email Address";
     if (step === "otp") return "Verify OTP";
     return "Complete Profile";
   };
 
   const getHeaderSub = () => {
-    if (step === "phone") return "Step 1 of 3 — Let's get started!";
-    if (step === "otp") return "Step 2 of 3 — Verify your number";
+    if (step === "email") return "Step 1 of 3 — Let's get started!";
+    if (step === "otp") return "Step 2 of 3 — Verify your email";
     return "Step 3 of 3 — Almost done!";
   };
 
@@ -566,12 +574,12 @@ const ProfileSetupScreen: React.FC = () => {
       >
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
-            {step !== "phone" && (
+            {step !== "email" && (
               <TouchableOpacity
                 style={styles.backBtn}
                 activeOpacity={0.7}
                 onPress={() => {
-                  if (step === "otp") setStep("phone");
+                  if (step === "otp") setStep("email");
                   else if (step === "profile") setStep("otp");
                 }}
               >
@@ -600,7 +608,7 @@ const ProfileSetupScreen: React.FC = () => {
             styles.progressBarFill,
             {
               width:
-                step === "phone"
+                step === "email"
                   ? "33%"
                   : step === "otp"
                     ? "66%"
@@ -623,18 +631,18 @@ const ProfileSetupScreen: React.FC = () => {
         <Animated.View
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
-          {/* ── STEP 1 — PHONE ── */}
-          {step === "phone" && (
+          {/* ── STEP 1 — EMAIL ── */}
+          {step === "email" && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={styles.sectionIconBox}>
                   <Feather
-                    name="phone"
+                    name="mail"
                     size={wp("5%")}
                     color={Colors.primary}
                   />
                 </View>
-                <Text style={styles.cardTitle}>What's your mobile number?</Text>
+                <Text style={styles.cardTitle}>What's your email address?</Text>
                 <Text style={styles.cardSubtitle}>
                   We'll send a verification code to confirm it's you.
                 </Text>
@@ -642,64 +650,47 @@ const ProfileSetupScreen: React.FC = () => {
 
               <View style={styles.phoneInputContainer}>
                 <View style={styles.countryBox}>
-                  <Text style={styles.countryFlag}>🇮🇳</Text>
-                  <Text style={styles.countryDial}>+91</Text>
                   <Ionicons
-                    name="chevron-down"
-                    size={wp("3.5%")}
-                    color={Colors.textMuted}
+                    name="mail-outline"
+                    size={wp("5%")}
+                    color={Colors.primary}
+                    style={{ marginRight: wp("1.5%") }}
                   />
                 </View>
                 <TextInput
-                  ref={phoneRef}
+                  ref={emailRef}
                   style={styles.phoneInput}
-                  placeholder="Enter mobile number"
+                  placeholder="Enter email address"
                   placeholderTextColor={Colors.textMuted}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  value={phone}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={email}
                   onChangeText={async (t) => {
-                    const cleaned = t.replace(/[^0-9]/g, "");
-                    setPhone(cleaned);
-                    setIsPhoneRegistered(false);
-                    if (cleaned.length === 10) {
-                      await checkPhoneRegistration(cleaned);
+                    setEmail(t);
+                    setIsEmailRegistered(false);
+                    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t.trim())) {
+                      await checkEmailRegistration(t);
                     }
                   }}
                   autoFocus
                 />
               </View>
 
-              {phone.length === 10 && (
+              {/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (
                 <View
                   style={[
                     styles.phoneStatus,
                     {
-                      backgroundColor: isPhoneRegistered
-                        ? "#E6F9F0"
-                        : "#FFF8E1",
+                      backgroundColor: isEmailRegistered
+                        ? "#FFF8E1"
+                        : "#E6F9F0",
                     },
                   ]}
                 >
-                  {checkingPhone ? (
+                  {checkingEmail ? (
                     <ActivityIndicator size="small" color={Colors.primary} />
-                  ) : isPhoneRegistered ? (
-                    <>
-                      <Feather
-                        name="check-circle"
-                        size={wp("4%")}
-                        color={Colors.success}
-                      />
-                      <Text
-                        style={[
-                          styles.phoneStatusText,
-                          { color: Colors.success },
-                        ]}
-                      >
-                        Number verified! Continue to complete your profile.
-                      </Text>
-                    </>
-                  ) : (
+                  ) : isEmailRegistered ? (
                     <>
                       <Feather
                         name="alert-circle"
@@ -712,8 +703,23 @@ const ProfileSetupScreen: React.FC = () => {
                           { color: Colors.warning },
                         ]}
                       >
-                        This number is not registered. Verify to create an
-                        account.
+                        Email already registered! Try logging in instead.
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Feather
+                        name="check-circle"
+                        size={wp("4%")}
+                        color={Colors.success}
+                      />
+                      <Text
+                        style={[
+                          styles.phoneStatusText,
+                          { color: Colors.success },
+                        ]}
+                      >
+                        Email available! Verify to create an account.
                       </Text>
                     </>
                   )}
@@ -723,11 +729,11 @@ const ProfileSetupScreen: React.FC = () => {
               <TouchableOpacity
                 style={[
                   styles.primaryBtn,
-                  phone.length !== 10 && styles.primaryBtnDisabled,
+                  (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || isEmailRegistered) && styles.primaryBtnDisabled,
                 ]}
                 onPress={handleSendOtp}
                 activeOpacity={0.87}
-                disabled={otpLoading || phone.length !== 10}
+                disabled={otpLoading || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || isEmailRegistered}
               >
                 {otpLoading ? (
                   <ActivityIndicator color={Colors.white} size="small" />
@@ -768,7 +774,7 @@ const ProfileSetupScreen: React.FC = () => {
                   <Text style={styles.cardTitle}>Enter verification code</Text>
                   <Text style={styles.cardSubtitle}>
                     We've sent a 6-digit code to{" "}
-                    <Text style={styles.phoneHighlight}>+91 {phone}</Text>
+                    <Text style={styles.phoneHighlight}>{email}</Text>
                   </Text>
                 </View>
 
@@ -777,7 +783,7 @@ const ProfileSetupScreen: React.FC = () => {
                     {otp.map((digit, i) => (
                       <TextInput
                         key={i}
-                        ref={(el) => (otpRefs.current[i] = el)}
+                        ref={(el) => { otpRefs.current[i] = el; }}
                         style={[
                           styles.otpBox,
                           digit ? styles.otpBoxFilled : null,
@@ -930,7 +936,7 @@ const ProfileSetupScreen: React.FC = () => {
                       onFocus={() => setActiveField("contactName")}
                       onBlur={() => setActiveField(null)}
                       returnKeyType="next"
-                      onSubmitEditing={() => addr1Ref.current?.focus()}
+                      onSubmitEditing={() => profilePhoneRef.current?.focus()}
                       autoCapitalize="words"
                     />
                   </View>
@@ -948,8 +954,9 @@ const ProfileSetupScreen: React.FC = () => {
                   )}
                 </View>
 
+                {/* Verified Email */}
                 <View style={styles.fieldWrap}>
-                  <Text style={styles.label}>Verified Mobile</Text>
+                  <Text style={styles.label}>Verified Email</Text>
                   <View
                     style={[
                       styles.inputWrapper,
@@ -960,19 +967,72 @@ const ProfileSetupScreen: React.FC = () => {
                       },
                     ]}
                   >
-                    <Feather
-                      name="phone"
+                    <Ionicons
+                      name="mail"
                       size={wp("4.5%")}
                       color={Colors.primary}
                       style={styles.inputIcon}
                     />
-                    <Text style={styles.verifiedPhoneText}>+91 {phone}</Text>
+                    <Text style={styles.verifiedPhoneText}>{email}</Text>
                     <MaterialCommunityIcons
                       name="check-decagram"
                       size={wp("4%")}
                       color={Colors.success}
                     />
                   </View>
+                </View>
+
+                {/* Mobile Number */}
+                <View style={styles.fieldWrap}>
+                  <Text style={styles.label}>
+                    Mobile Number <Text style={styles.required}>*</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        borderColor: inputBorderColor("phone"),
+                        backgroundColor: inputBg("phone"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="phone"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "phone"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.inputIcon}
+                    />
+                    <TextInput
+                      ref={profilePhoneRef}
+                      style={styles.inputWithIcon}
+                      placeholder="e.g. 9876543210"
+                      placeholderTextColor={Colors.textMuted}
+                      value={form.phone}
+                      onChangeText={(t) => update("phone")(t.replace(/[^0-9]/g, ""))}
+                      onFocus={() => setActiveField("phone")}
+                      onBlur={() => setActiveField(null)}
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      returnKeyType="next"
+                      onSubmitEditing={() => addr1Ref.current?.focus()}
+                    />
+                  </View>
+                  {errors.phone && (
+                    <View style={styles.errorContainer}>
+                      <Feather
+                        name="alert-circle"
+                        size={wp("3.5%")}
+                        color={Colors.error}
+                      />
+                      <Text style={styles.fieldError}>
+                        {errors.phone}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
 

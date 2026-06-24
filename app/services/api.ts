@@ -1,8 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // export const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "https://customer-xnab.onrender.com";
-// export const BASE_URL = "http://10.64.32.75:5000";
+// export const BASE_URL = "https://customer-u8ip.onrender.com";
+export const BASE_URL = "http://10.28.69.75:5000";
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 export const saveToken = async (token: string) => {
@@ -81,8 +81,9 @@ export const apiGetMe = (): Promise<{
   success: boolean;
   user: {
     _id: string;
-    phone: string;
-    countryCode: string;
+    email: string;
+    phone?: string;
+    countryCode?: string;
     role: string;
     isProfileComplete: boolean;
     approvalStatus: string;
@@ -103,6 +104,7 @@ export const apiGetMe = (): Promise<{
 
 export const apiUpdateProfile = (payload: {
   contactName: string;
+  phone: string;
   addressLine1: string;
   addressLine2?: string;
   city: string;
@@ -116,23 +118,30 @@ export const apiUpdateProfile = (payload: {
     true,
   );
 
-export const apiCheckPhone = (phone: string) =>
-  apiFetch(`/auth/check-phone?phone=${phone}`);
+export const apiCheckEmail = (email: string) =>
+  apiFetch(`/auth/check-email?email=${encodeURIComponent(email)}`);
 
-export const apiSendOtp = (phone: string) =>
+export const apiSendOtp = (email: string) =>
   apiFetch("/auth/send-otp", {
     method: "POST",
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ email }),
   });
 
-export const apiVerifyOtp = (phone: string, otp: string) =>
+export const apiVerifyOtp = (email: string, otp: string) =>
   apiFetch("/auth/verify-otp", {
     method: "POST",
-    body: JSON.stringify({ phone, otp }),
+    body: JSON.stringify({ email, otp }),
+  });
+
+export const apiGoogleLogin = (idToken: string) =>
+  apiFetch("/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ idToken }),
   });
 
 export const apiCompleteProfile = (payload: {
   contactName: string;
+  phone: string;
   addressLine1: string;
   addressLine2?: string;
   city: string;
@@ -169,6 +178,8 @@ export interface PlaceOrderPayload {
   deliveryTip?: number;
   paymentMethod?: "upi" | "cod" | "card" | "netbanking";
   transactionId?: string;
+  totalAmount?: number;
+  subtotal?: number;
 }
 
 // ─── Updated Order Types for Electronics Accessories ──────────────────────────

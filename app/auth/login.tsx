@@ -1,5 +1,7 @@
 import { Text } from "@/context/FontContext";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import auth from "@react-native-firebase/auth";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -27,14 +29,15 @@ import Colors from "../../constants/colors";
 import {
   apiCompleteProfile,
   apiGetMe,
+  apiGoogleLogin,
   apiSendOtp,
   apiVerifyOtp,
   getToken,
-  saveToken,
+  saveToken
 } from "../services/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Screen = "phone" | "otp" | "profile";
+type Screen = "email" | "otp" | "profile";
 
 interface CountryCode {
   flag: string;
@@ -44,6 +47,7 @@ interface CountryCode {
 
 interface ProfileForm {
   contactName: string;
+  phone: string;
   addressLine1: string;
   addressLine2: string;
   city: string;
@@ -56,6 +60,7 @@ interface ProfileForm {
 
 interface FieldError {
   contactName?: string;
+  phone?: string;
   addressLine1?: string;
   city?: string;
   state?: string;
@@ -94,19 +99,21 @@ const INDIAN_STATES = [
 // ─── Main Component ───────────────────────────────────────────────────────────
 const LoginScreen: React.FC = () => {
   // ── Screen state ──
-  const [screen, setScreen] = useState<Screen>("phone");
+  const [screen, setScreen] = useState<Screen>("email");
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // ── Phone / OTP state ──
-  const [phone, setPhone] = useState("");
+  // ── Email / OTP state ──
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendTimer, setResendTimer] = useState(0);
 
   // ── Profile form state ──
   const [form, setForm] = useState<ProfileForm>({
     contactName: "",
+    phone: "",
     addressLine1: "",
     addressLine2: "",
     city: "",
@@ -128,7 +135,8 @@ const LoginScreen: React.FC = () => {
 
   // ── Refs ──
   const otpRefs = useRef<(TextInput | null)[]>([]);
-  const phoneRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const profilePhoneRef = useRef<TextInput>(null);
   const nameRef = useRef<TextInput>(null);
   const addr1Ref = useRef<TextInput>(null);
   const addr2Ref = useRef<TextInput>(null);
@@ -152,7 +160,7 @@ const LoginScreen: React.FC = () => {
     useCallback(() => {
       const onBackPress = () => {
         if (screen === "otp") {
-          setScreen("phone");
+          setScreen("email");
           setOtp(Array(OTP_LENGTH).fill(""));
           setError("");
           return true;
@@ -161,7 +169,7 @@ const LoginScreen: React.FC = () => {
           setError("");
           return true;
         } else {
-          // On the main phone screen - exit the app
+          // On the main email screen - exit the app
           BackHandler.exitApp();
           return true;
         }
@@ -298,19 +306,28 @@ const LoginScreen: React.FC = () => {
     ]).start();
   }, [shakeAnim]);
 
-  const isPhoneValid = phone.replace(/\s/g, "").length === 10;
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  // ── Configure Google Sign In ──
+  useEffect(() => {
+    GoogleSignin.configure({
+      // Web Client ID is required for Firebase Auth Google Login.
+      // Replace with your Web Client ID from Firebase console / Google Developer console.
+      webClientId: "716649952111-67f1ki773jd70js6tuc5obd1e4meb4vm.apps.googleusercontent.com",
+    });
+  }, []);
 
   // ── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async () => {
-    if (!isPhoneValid) {
-      setError("Please enter a valid 10-digit mobile number.");
+    if (!isEmailValid) {
+      setError("Please enter a valid email address.");
       triggerShake();
       return;
     }
     setError("");
     setLoading(true);
     try {
-      await apiSendOtp(phone);
+      await apiSendOtp(email);
       setResendTimer(RESEND_COOLDOWN);
       setScreen("otp");
       setTimeout(() => otpRefs.current[0]?.focus(), 400);
@@ -319,6 +336,49 @@ const LoginScreen: React.FC = () => {
       triggerShake();
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Google Login ──────────────────────────────────────────────────────────
+  const handleGoogleLogin = async () => {
+    setError("");
+    setGoogleLoading(true);
+    try {
+      await GoogleSignin.signOut(); // force account picker every time
+
+      const signInResult = await GoogleSignin.signIn();
+      const idToken = signInResult.data?.idToken;
+      if (!idToken) {
+        throw new Error("No Google ID token received.");
+      }
+
+      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+      const userCredential = await auth().signInWithCredential(googleCredential);
+      
+      const firebaseIdToken = await userCredential.user.getIdToken();
+      const data = await apiGoogleLogin(firebaseIdToken);
+      await saveToken(data.token);
+
+      if (data.isNewUser || !data.isProfileComplete) {
+        setEmail(userCredential.user.email || "");
+        setForm((prev) => ({
+          ...prev,
+          contactName: userCredential.user.displayName || prev.contactName,
+        }));
+        setScreen("profile");
+        setTimeout(() => nameRef.current?.focus(), 400);
+      } else {
+        router.replace("/(tabs)/home");
+      }
+    } catch (err: any) {
+      console.error("[GoogleLogin Error]", err);
+      try {
+        await auth().signOut();
+      } catch {}
+      setError(err.message || "Google Login failed. Please try again.");
+      triggerShake();
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -361,11 +421,10 @@ const LoginScreen: React.FC = () => {
     setError("");
     setLoading(true);
     try {
-      const data = await apiVerifyOtp(phone, otpCode);
+      const data = await apiVerifyOtp(email, otpCode);
       await saveToken(data.token);
 
       if (data.isNewUser || !data.isProfileComplete) {
-        // New user — show profile form (same login UI)
         setScreen("profile");
         setTimeout(() => nameRef.current?.focus(), 400);
       } else {
@@ -388,7 +447,7 @@ const LoginScreen: React.FC = () => {
     setOtp(Array(OTP_LENGTH).fill(""));
     setError("");
     try {
-      await apiSendOtp(phone);
+      await apiSendOtp(email);
       setResendTimer(RESEND_COOLDOWN);
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
     } catch (err: any) {
@@ -458,6 +517,9 @@ const LoginScreen: React.FC = () => {
     if (!form.contactName.trim()) e.contactName = "Contact name is required.";
     else if (form.contactName.trim().length < 2)
       e.contactName = "Please enter a valid name.";
+    if (!form.phone.trim()) e.phone = "Phone number is required.";
+    else if (!/^\d{10}$/.test(form.phone.trim()))
+      e.phone = "Enter a valid 10-digit mobile number.";
     if (!form.addressLine1.trim()) e.addressLine1 = "Address is required.";
     if (!form.city.trim()) e.city = "City is required.";
     if (!form.state.trim()) e.state = "State is required.";
@@ -480,6 +542,7 @@ const LoginScreen: React.FC = () => {
     try {
       const data = await apiCompleteProfile({
         contactName: form.contactName,
+        phone: form.phone,
         addressLine1: form.addressLine1,
         addressLine2: form.addressLine2,
         city: form.city,
@@ -583,7 +646,7 @@ const LoginScreen: React.FC = () => {
                 style={styles.backBtn}
                 onPress={() => {
                   if (screen === "otp") {
-                    setScreen("phone");
+                    setScreen("email");
                     setOtp(Array(OTP_LENGTH).fill(""));
                     setError("");
                   } else if (screen === "profile") {
@@ -636,8 +699,8 @@ const LoginScreen: React.FC = () => {
               },
             ]}
           >
-            {/* ══ PHONE SCREEN ══════════════════════════════════════════════ */}
-            {screen === "phone" && (
+            {/* ══ EMAIL SCREEN ══════════════════════════════════════════════ */}
+            {screen === "email" && (
               <>
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardTitle}>Welcome Back</Text>
@@ -647,37 +710,51 @@ const LoginScreen: React.FC = () => {
                 </View>
 
                 <View style={styles.inputSection}>
-                  <Text style={styles.inputLabel}>Mobile Number</Text>
-                  <View style={styles.phoneInputCombined}>
-                    {/* Country Code Fixed Part */}
-                    <View style={styles.countryCodeFixed}>
-                      <Text style={styles.countryFlagFixed}>
-                        {COUNTRY.flag}
-                      </Text>
-                      <Text style={styles.countryDialFixed}>
-                        {COUNTRY.dial}
-                      </Text>
-                    </View>
-
-                    {/* Separator */}
-                    <View style={styles.phoneSeparator} />
-
-                    {/* Phone Number Input */}
+                  <Text style={styles.inputLabel}>Email Address</Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: error
+                          ? Colors.error
+                          : activeField === "email"
+                            ? Colors.primary
+                            : Colors.border,
+                        backgroundColor: error
+                          ? "#FFF5F5"
+                          : activeField === "email"
+                            ? (Colors.primaryLight ?? "#EEF3FF")
+                            : Colors.surfaceAlt,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="mail-outline"
+                      size={wp("4.5%")}
+                      color={
+                        error
+                          ? Colors.error
+                          : activeField === "email"
+                            ? Colors.primary
+                            : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
                     <TextInput
-                      ref={phoneRef}
-                      style={[
-                        styles.phoneInputField,
-                        error ? styles.phoneInputError : null,
-                      ]}
-                      placeholder="Enter mobile number"
+                      ref={emailRef}
+                      style={styles.profileInput}
+                      placeholder="Enter your email"
                       placeholderTextColor={Colors.textMuted}
-                      keyboardType="phone-pad"
-                      maxLength={10}
-                      value={phone}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      value={email}
                       onChangeText={(t) => {
-                        setPhone(t.replace(/[^0-9]/g, ""));
+                        setEmail(t);
                         setError("");
                       }}
+                      onFocus={() => setActiveField("email")}
+                      onBlur={() => setActiveField(null)}
                       returnKeyType="done"
                       onSubmitEditing={handleSendOtp}
                       autoFocus
@@ -699,11 +776,11 @@ const LoginScreen: React.FC = () => {
                 <TouchableOpacity
                   style={[
                     styles.primaryBtn,
-                    !isPhoneValid && styles.primaryBtnDisabled,
+                    !isEmailValid && styles.primaryBtnDisabled,
                   ]}
                   onPress={handleSendOtp}
                   activeOpacity={0.85}
-                  disabled={loading || !isPhoneValid}
+                  disabled={loading || !isEmailValid}
                 >
                   {loading ? (
                     <ActivityIndicator color={Colors.white} size="small" />
@@ -712,10 +789,38 @@ const LoginScreen: React.FC = () => {
                       <Text style={styles.primaryBtnText}>Continue</Text>
                       <Ionicons
                         name="arrow-forward"
-                        size={wp("5%")}
+                        size={wp("4.5%")}
                         color={Colors.white}
-                        style={{ marginLeft: wp("2%"), marginBottom: "4" }}
+                        style={{ marginLeft: wp("2%"), marginTop: hp("0.1%") }}
                       />
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <TouchableOpacity
+                  style={styles.googleBtn}
+                  onPress={handleGoogleLogin}
+                  activeOpacity={0.85}
+                  disabled={googleLoading || loading}
+                >
+                  {googleLoading ? (
+                    <ActivityIndicator color={Colors.primary} size="small" />
+                  ) : (
+                    <>
+                      <View style={styles.googleIconContainer}>
+                        <Image
+                          source={require("../../assets/images/google.png")}
+                          style={{ width: wp("5.5%"), height: wp("5.5%") }}
+                          resizeMode="contain"
+                        />
+                      </View>
+                      <Text style={styles.googleBtnText}>Continue with Google</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -736,7 +841,7 @@ const LoginScreen: React.FC = () => {
                   <Text style={styles.cardSubtitle}>
                     We've sent a 6-digit code to{" "}
                     <Text style={styles.phoneHighlight}>
-                      {COUNTRY.dial} {phone}
+                      {email}
                     </Text>
                   </Text>
                 </View>
@@ -746,7 +851,7 @@ const LoginScreen: React.FC = () => {
                     {otp.map((digit, i) => (
                       <TextInput
                         key={i}
-                        ref={(el) => (otpRefs.current[i] = el)}
+                        ref={(el) => { otpRefs.current[i] = el; }}
                         style={[
                           styles.otpBox,
                           digit ? styles.otpBoxFilled : null,
@@ -881,7 +986,7 @@ const LoginScreen: React.FC = () => {
                       onFocus={() => setActiveField("contactName")}
                       onBlur={() => setActiveField(null)}
                       returnKeyType="next"
-                      onSubmitEditing={() => addr1Ref.current?.focus()}
+                      onSubmitEditing={() => profilePhoneRef.current?.focus()}
                       autoCapitalize="words"
                     />
                   </View>
@@ -892,9 +997,9 @@ const LoginScreen: React.FC = () => {
                   )}
                 </View>
 
-                {/* ─ Verified phone display ─ */}
+                {/* ─ Verified email display ─ */}
                 <View style={styles.profileFieldWrap}>
-                  <Text style={styles.inputLabel}>Verified Mobile</Text>
+                  <Text style={styles.inputLabel}>Verified Email</Text>
                   <View
                     style={[
                       styles.profileInputWrapper,
@@ -904,21 +1009,19 @@ const LoginScreen: React.FC = () => {
                       },
                     ]}
                   >
-                    <Image
-                      source={require("../../assets/images/whatsapp-icon.png")}
-                      style={[
-                        styles.profileInputIcon,
-                        { width: wp("4.5%"), height: wp("4.5%") },
-                      ]}
-                      resizeMode="contain"
+                    <Ionicons
+                      name="mail-outline"
+                      size={wp("4.5%")}
+                      color={Colors.primary}
+                      style={styles.profileInputIcon}
                     />
                     <Text
                       style={[
                         styles.profileInput,
-                        { color: Colors.primary, fontWeight: "700" },
+                        { color: Colors.primary, fontWeight: "600" },
                       ]}
                     >
-                      +91 {phone}
+                      {email}
                     </Text>
                     <MaterialCommunityIcons
                       name="check-decagram"
@@ -926,6 +1029,52 @@ const LoginScreen: React.FC = () => {
                       color={Colors.success ?? "#22C55E"}
                     />
                   </View>
+                </View>
+
+                {/* ─ Mobile Number ─ */}
+                <View style={styles.profileFieldWrap}>
+                  <Text style={styles.inputLabel}>
+                    Mobile Number <Text style={{ color: Colors.error }}>*</Text>
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileInputWrapper,
+                      {
+                        borderColor: inputBorderColor("phone"),
+                        backgroundColor: inputBg("phone"),
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="phone"
+                      size={wp("4.5%")}
+                      color={
+                        activeField === "phone"
+                          ? Colors.primary
+                          : Colors.textMuted
+                      }
+                      style={styles.profileInputIcon}
+                    />
+                    <TextInput
+                      ref={profilePhoneRef}
+                      style={styles.profileInput}
+                      placeholder="e.g. 9876543210"
+                      placeholderTextColor={Colors.textMuted}
+                      value={form.phone}
+                      onChangeText={(t) => updateForm("phone")(t.replace(/[^0-9]/g, ""))}
+                      onFocus={() => setActiveField("phone")}
+                      onBlur={() => setActiveField(null)}
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      returnKeyType="next"
+                      onSubmitEditing={() => addr1Ref.current?.focus()}
+                    />
+                  </View>
+                  {!!fieldErrors.phone && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.phone}
+                    </Text>
+                  )}
                 </View>
 
                 {/* ─ Divider ─ */}
@@ -1622,7 +1771,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.9)",
     marginTop: hp("0.5%"),
     fontWeight: "700",
-    marginBottom: hp("2.5%"),
+    marginBottom: hp("0.5%"),
   },
 
   card: {
@@ -1799,13 +1948,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 8,
-    minHeight: hp("6.5%"), // Add minimum height for consistency
+    // minHeight: hp("6.5%"), // Add minimum height for consistency
   },
   primaryBtnText: {
     fontSize: wp("4.2%"),
     fontWeight: "700",
     color: Colors.textOnPrimary,
     letterSpacing: 0.5,
+    marginTop: hp("0.5%"),
     lineHeight: wp("5%"), // Add lineHeight
     textAlignVertical: "center", // Android alignment
     includeFontPadding: false,
@@ -2113,6 +2263,47 @@ const styles = StyleSheet.create({
     fontSize: wp("4.2%"),
     fontWeight: "800",
     color: Colors.white,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: hp("2.5%"),
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border || "#E2E8F0",
+  },
+  dividerText: {
+    fontSize: wp("3.5%"),
+    color: Colors.textMuted || "#A0AEC0",
+    paddingHorizontal: wp("3%"),
+  },
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface || "#FFFFFF",
+    borderWidth: 1,
+    borderColor: Colors.border || "#E2E8F0",
+    borderRadius: wp("3.5%"),
+    paddingVertical: hp("1.8%"),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: hp("1.5%"),
+  },
+  googleIconContainer: {
+    marginRight: wp("3%"),
+  },
+  googleBtnText: {
+    marginTop: hp("0.4%"),
+    fontSize: wp("4%"),
+    fontWeight: "700",
+    fontFamily: "VivoSans-Bold",
+    color: Colors.textPrimary || "#1A202C",
   },
 });
 

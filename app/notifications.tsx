@@ -24,8 +24,8 @@ import Colors from "../constants/colors";
 
 // ─── API Base URL ─────────────────────────────────────────────────────────────
 // export const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "https://customer-xnab.onrender.com";
-// export const BASE_URL = "http://10.64.32.75:5000";
+// export const BASE_URL = "https://customer-u8ip.onrender.com";
+export const BASE_URL = "http://10.28.69.75:5000";
 
 // ─── Notification Types ───────────────────────────────────────────────────────
 export interface ApiNotification {

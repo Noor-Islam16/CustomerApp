@@ -155,7 +155,7 @@ export const ApprovalProvider: React.FC<{ children: React.ReactNode }> = ({
         JSON.stringify({
           success: response.success,
           approvalStatus: response.user?.approvalStatus,
-          userId: response.user?._id || response.user?.id,
+          userId: response.user?._id,
         }),
       );
 
@@ -165,7 +165,7 @@ export const ApprovalProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       const liveStatus: string = response.user.approvalStatus || "pending";
-      const currentUserId: string = response.user._id || response.user.id;
+      const currentUserId: string = response.user._id;
 
       setApprovalStatus(liveStatus);
       console.log(

@@ -33,6 +33,7 @@ import {
   apiUpdateProfile,
   BASE_URL,
   Order,
+  PlaceOrderPayload,
 } from "./services/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ const CheckoutScreen: React.FC = () => {
       setLoadingProfile(true);
       const res = await apiGetMe();
       setUserProfile(res.user.profile);
-      setUserPhone(res.user.phone);
+      setUserPhone(res.user.phone || "");
       setApprovalStatus(res.user.approvalStatus || "pending");
     } catch {
       setUserProfile(null);
@@ -284,7 +285,7 @@ const CheckoutScreen: React.FC = () => {
 
     try {
       // ✅ FIX: Use "productId" instead of "product"
-      const payload = {
+      const payload: PlaceOrderPayload = {
         items: orderData.items.map((item: any) => ({
           productId: item.product._id || item.product.id, // 👈 Changed to productId
           quantity: item.quantity,
@@ -406,6 +407,7 @@ const CheckoutScreen: React.FC = () => {
       setIsSavingProfile(true);
       await apiUpdateProfile({
         contactName: editName.trim(),
+        phone: editPhone.trim(),
         addressLine1: editAddressLine1.trim(),
         addressLine2: editAddressLine2.trim(),
         city: editCity.trim(),

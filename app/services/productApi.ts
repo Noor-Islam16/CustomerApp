@@ -1,8 +1,8 @@
 import { getToken } from "./api";
 
 // const BASE_URL = "https://customer-7bcb.onrender.com";
-export const BASE_URL = "https://customer-xnab.onrender.com";
-// export const BASE_URL = "http://10.64.32.75:5000";
+// export const BASE_URL = "https://customer-u8ip.onrender.com";
+export const BASE_URL = "http://10.28.69.75:5000";
 
 export interface ProductImage {
   url: string;
@@ -81,6 +81,7 @@ export const fetchProducts = async (params?: {
     if (params?.search) query.set("search", params.search);
     if (params?.compatibility) query.set("compatibility", params.compatibility);
     if (params?.color) query.set("color", params.color);
+    query.set("isActive", "true");
 
     const url = `${BASE_URL}/api/products?${query.toString()}`;
     console.log("📡 Fetching electronics products:", url);
@@ -125,7 +126,6 @@ export const fetchAllProducts = async (): Promise<ApiProduct[]> => {
   }
 };
 
-// Fetch featured products
 export const fetchFeaturedProducts = async (): Promise<ApiProduct[]> => {
   try {
     const data = await fetchProducts({ featured: true, limit: 10 });
@@ -136,13 +136,73 @@ export const fetchFeaturedProducts = async (): Promise<ApiProduct[]> => {
   }
 };
 
-// Fetch fast moving products
 export const fetchFastMovingProducts = async (): Promise<ApiProduct[]> => {
   try {
     const data = await fetchProducts({ fastMoving: true, limit: 10 });
     return data;
   } catch (error) {
     console.error("❌ Error fetching fast moving products:", error);
+    throw error;
+  }
+};
+
+export const subscribeToStockAlert = async (
+  productId: string,
+): Promise<any> => {
+  try {
+    const token = await getToken();
+    const response = await fetch(`${BASE_URL}/api/stocks/notify-me`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ productId }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Failed to subscribe to stock alert:", error);
+    throw error;
+  }
+};
+
+export const checkNotifyStatus = async (productId: string): Promise<any> => {
+  try {
+    const token = await getToken();
+    const response = await fetch(
+      `${BASE_URL}/api/stocks/notify-status/${productId}`,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Failed to check notify status:", error);
+    throw error;
+  }
+};
+
+export const unsubscribeStockAlert = async (
+  productId: string,
+): Promise<any> => {
+  try {
+    const token = await getToken();
+    const response = await fetch(
+      `${BASE_URL}/api/stocks/notify-me/${productId}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Failed to unsubscribe stock alert:", error);
     throw error;
   }
 };

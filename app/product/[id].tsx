@@ -37,7 +37,9 @@ import { ApiProduct, fetchProducts } from "../services/productApi";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // const BASE_URL = "https://customer-7bcb.onrender.com";
-const BASE_URL = "https://customer-xnab.onrender.com";
+// const BASE_URL = "https://customer-u8ip.onrender.com";
+export const BASE_URL = "http://10.28.69.75:5000";
+
 
 // Map API product to app Product format
 const mapApiProductToAppProduct = (apiProduct: ApiProduct): Product => {
@@ -554,6 +556,7 @@ const ProductDetailsScreen: React.FC = () => {
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
+  const [similarProductsLoading, setSimilarProductsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"details" | "specifications">(
     "details",
   );
@@ -569,43 +572,47 @@ const ProductDetailsScreen: React.FC = () => {
 
   // ── Fetch Product ──
   useEffect(() => {
-    const fetchProductDetails = async () => {
-      if (!id) return;
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await fetch(`${BASE_URL}/api/products/${id}`);
-        const data = await response.json();
-        if (!data.success || !data.data)
-          throw new Error(data.message || "Product not found");
-        const apiProduct = data.data;
-        const mappedProduct = mapApiProductToAppProduct(apiProduct);
-        setProduct(mappedProduct);
-        const minQty = !apiProduct.enforceOrderLimits
-          ? 1
-          : apiProduct.minOrderQuantity || 1;
-        setQuantity(minQty);
-        try {
-          const similarData = await fetchProducts({
-            category: apiProduct.category,
-            limit: 6,
-          });
+  const fetchProductDetails = async () => {
+    if (!id) return;
+    try {
+      setLoading(true);
+      setError(null);
+      setSimilarProductsLoading(true); 
+
+      const response = await fetch(`${BASE_URL}/api/products/${id}`);
+      const data = await response.json();
+      if (!data.success || !data.data)
+        throw new Error(data.message || "Product not found");
+
+      const apiProduct = data.data;
+      const mappedProduct = mapApiProductToAppProduct(apiProduct);
+      setProduct(mappedProduct);
+
+      const minQty = !apiProduct.enforceOrderLimits
+        ? 1
+        : apiProduct.minOrderQuantity || 1;
+      setQuantity(minQty);
+
+      // Fetch similar products separately — don't block main render
+      fetchProducts({ category: apiProduct.category, limit: 6 })
+        .then((similarData) => {
           const filtered = similarData
             .filter((p) => p._id !== id)
             .map(mapApiProductToAppProduct)
             .slice(0, 6);
           setSimilarProducts(filtered);
-        } catch (similarError) {
-          console.error("Failed to fetch similar products:", similarError);
-        }
-      } catch (err: any) {
-        setError(err.message || "Failed to load product");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProductDetails();
-  }, [id]);
+        })
+        .catch((err) => console.error("Failed to fetch similar products:", err))
+        .finally(() => setSimilarProductsLoading(false)); // ← resolves after
+
+    } catch (err: any) {
+      setError(err.message || "Failed to load product");
+    } finally {
+      setLoading(false); // main product ready, don't wait for similar
+    }
+  };
+  fetchProductDetails();
+}, [id]);
 
   // ── Sync local quantity with cart ──
   const currentCartQuantity = product ? getCartQuantity(product.id) : 0;
@@ -772,7 +779,11 @@ const ProductDetailsScreen: React.FC = () => {
       )
     : 0;
 
-  const displayQuantity = isInCart ? currentCartQuantity : quantity;
+  const displayQuantity = product
+  ? isInCart
+    ? currentCartQuantity
+    : quantity
+  : 0; 
 
   const productImages =
     product.images && product.images.length > 0
@@ -909,7 +920,7 @@ const ProductDetailsScreen: React.FC = () => {
                       <Image
                         source={{ uri: image }}
                         style={styles.productImage}
-                        resizeMode="cover"
+                        resizeMode="contain"
                         onError={() =>
                           setImageErrors((prev) => new Set(prev).add(index))
                         }
@@ -991,12 +1002,12 @@ const ProductDetailsScreen: React.FC = () => {
                 </Text>
               </View>
             )}
-            {product.warranty && product.warranty !== "No Warranty" && (
+            {/* {product.warranty && product.warranty !== "No Warranty" && (
               <View style={styles.quickInfoChip}>
                 <Feather name="shield" size={wp("3%")} color={Colors.success} />
                 <Text style={styles.quickInfoText}>{product.warranty}</Text>
               </View>
-            )}
+            )} */}
           </View>
 
           {/* Fast Moving & Featured Badges */}
@@ -1354,12 +1365,12 @@ const ProductDetailsScreen: React.FC = () => {
                     <Text style={styles.specValue}>{product.weight}</Text>
                   </View>
                 )}
-                <View style={styles.specRow}>
+                {/* <View style={styles.specRow}>
                   <Text style={styles.specLabel}>Warranty</Text>
                   <Text style={styles.specValue}>
                     {product.warranty || "No Warranty"}
                   </Text>
-                </View>
+                </View> */}
                 <View style={styles.specRow}>
                   <Text style={styles.specLabel}>Min Order Qty</Text>
                   <Text style={styles.specValue}>
@@ -1412,8 +1423,8 @@ const ProductDetailsScreen: React.FC = () => {
           <View style={styles.divider} />
 
           {/* Similar Products */}
-          {similarProducts.length > 0 && (
-            <View style={styles.similarSection}>
+          {!similarProductsLoading && similarProducts.length > 0 && (
+  <View style={styles.similarSection}>
               <View style={styles.similarHeader}>
                 <Text style={styles.similarTitle}>Similar Products</Text>
                 <TouchableOpacity onPress={() => router.push("/products")}>
